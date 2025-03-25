@@ -159,4 +159,4 @@ az account set --subscription <subscription-id>
 
 - **Parameter Name**: `difyPluginDaemonImage`
 - **Type**: `string`
-- **Default Value**: `langgenius/dify-plugin-daemon:0.0.6-serverless`
+- **Default Value**: `langgenius/dify-plugin-daemon:0.0.6-local`

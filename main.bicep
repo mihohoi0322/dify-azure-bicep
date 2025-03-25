@@ -64,7 +64,7 @@ param difySandboxImage string = 'langgenius/dify-sandbox:0.2.10'
 param difyWebImage string = 'langgenius/dify-web:1.1.2'
 
 @description('Dify Plugin Daemonイメージ')
-param difyPluginDaemonImage string = 'langgenius/dify-plugin-daemon:0.0.6-serverless'
+param difyPluginDaemonImage string = 'langgenius/dify-plugin-daemon:0.0.6-local'
 
 
 // リソースグループを作成

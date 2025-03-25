@@ -770,6 +770,10 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'PLUGIN_DAEMON_KEY'
               value: 'lYkiYYT6owG+71oLerGzA7GXCgOT++6ovaezWAjpCjf+Sjc3ZtU+qUEi'
             }
+            {
+              name: 'INNER_API_KEY_FOR_PLUGIN'
+              value: '-QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1'
+            }
           ]
         }
       ]
@@ -859,7 +863,7 @@ resource pluginDaemonApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'DIFY_INNER_API_KEY'
-              value: 'sk-9f73s3ljTXVcMT3Blb3ljTqtsKiGHXVcMT3BlbkFJLK7U'
+              value: '-QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1'
             }
             {
               name: 'DIFY_INNER_API_URL'
