@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "japaneast"
+    },
+    "resourceGroupPrefix": {
+      "value": "rg-dify"
+    },
+    "pgsqlUser": {
+      "value": "adminuser"
+    },
+    "pgsqlPassword": {
+      "value": "DFE%S_FgrgeA143Sdx"
+    },
+    "isProvidedCert": {
+      "value": false
+    },
+    "acaCertPassword": {
+      "value": "fergEAR#FSr!eg"
+    },
+    "acaAppMinCount": {
+      "value": 1
+    },
+    "isAcaEnabled": {
+      "value": true
+    }
+  }
+}

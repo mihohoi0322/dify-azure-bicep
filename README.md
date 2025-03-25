@@ -1,5 +1,7 @@
-## dify-azure-terraform
-Deploy [langgenius/dify](https://github.com/langgenius/dify), an LLM based chat bot app on Azure with terraform.
+## dify-azure-bicep
+Deploy [langgenius/dify](https://github.com/langgenius/dify), an LLM based chat bot app on Azure with Bicep.
+
+> **Note**: This repository rewrites the contents of [dify-azure-terraform](https://github.com/nikawang/dify-azure-terraform) in Bicep and supports Dify 1.x.
 
 ### Topology
 Front-end access:
@@ -15,130 +17,146 @@ Back-end components:
 - vectordb -> Azure Database for PostgreSQL
 - redis -> Azure Cache for Redis
 
-Before you provision Dify, please check and set the variables in var.tf file.
+Before you provision Dify, please check and set the variables in parameters.json file.
 
-### Terraform Variables Documentation
+### Bicep Variables Documentation
 
-This document provides detailed descriptions of the variables used in the Terraform configuration for setting up the Dify environment.
-
+This document provides detailed descriptions of the variables used in the Bicep configuration for setting up the Dify environment.
 ### Kick Start
 ```bash
-terraform init
-terraform plan
-terraform apply --auto-approve
+az login
+az account set --subscription <subscription-id>
+./deploy.ps1
 ```
 
-#### Subscription ID
+### Deployment Parameters
 
-- **Variable Name**: `subscription-id`
-- **Type**: `string`
-- **Default Value**: `0000000000000`
+#### Region
 
-#### Virtual Network Variables
-
-##### Region
-
-- **Variable Name**: `region`
+- **Parameter Name**: `location`
 - **Type**: `string`
 - **Default Value**: `japaneast`
 
-##### VNET Address IP Prefix
+#### Resource Group Prefix
 
-- **Variable Name**: `ip-prefix`
+- **Parameter Name**: `resourceGroupPrefix`
+- **Type**: `string`
+- **Default Value**: `rg-dify`
+
+### Network Parameters
+
+#### VNET Address IP Prefix
+
+- **Parameter Name**: `ipPrefix`
 - **Type**: `string`
 - **Default Value**: `10.99`
 
 #### Storage Account
 
-- **Variable Name**: `storage-account`
+- **Parameter Name**: `storageAccountBase`
 - **Type**: `string`
 - **Default Value**: `acadifytest`
 
-##### Storage Account Container
+#### Storage Account Container
 
-- **Variable Name**: `storage-account-container`
+- **Parameter Name**: `storageAccountContainer`
 - **Type**: `string`
 - **Default Value**: `dfy`
 
-#### Redis
+### Redis
 
-- **Variable Name**: `redis`
+- **Parameter Name**: `redisNameBase`
 - **Type**: `string`
 - **Default Value**: `acadifyredis`
 
 #### PostgreSQL Flexible Server
 
-- **Variable Name**: `psql-flexible`
+- **Parameter Name**: `psqlFlexibleBase`
 - **Type**: `string`
 - **Default Value**: `acadifypsql`
 
-##### PostgreSQL User
+#### PostgreSQL User
 
-- **Variable Name**: `pgsql-user`
+- **Parameter Name**: `pgsqlUser`
 - **Type**: `string`
-- **Default Value**: `user`
+- **Default Value**: `adminuser`
 
-##### PostgreSQL Password
+#### PostgreSQL Password
 
-- **Variable Name**: `pgsql-password`
+- **Parameter Name**: `pgsqlPassword`
 - **Type**: `string`
-- **Default Value**: `#QWEASDasdqwe`
+- **Default Value**: `DFE%S_FgrgeA143Sdx`
+- **Note**: Specified as a secure parameter
 
-#### ACA Environment Variables
+### ACA Environment Parameters
 
-##### ACA Environment
+#### ACA Environment
 
-- **Variable Name**: `aca-env`
+- **Parameter Name**: `acaEnvName`
 - **Type**: `string`
 - **Default Value**: `dify-aca-env`
 
-##### ACA Log Analytics Workspace
+#### ACA Log Analytics Workspace
 
-- **Variable Name**: `aca-loga`
+- **Parameter Name**: `acaLogaName`
 - **Type**: `string`
 - **Default Value**: `dify-loga`
 
-##### IF BRING YOUR OWN CERTIFICATE
+#### IF BRING YOUR OWN CERTIFICATE
 
-- **Variable Name**: `isProvidedCert`
+- **Parameter Name**: `isProvidedCert`
 - **Type**: `bool`
 - **Default Value**: `false`
 
 
 ##### ACA Certificate Path (if isProvidedCert is true)
 
-- **Variable Name**: `aca-cert-path`
+- **Parameter Name**: `acaCertBase64Value`
 - **Type**: `string`
-- **Default Value**: `./certs/difycert.pfx`
+- **Default Value**: ``
+- **Note**: Specified as a secure parameter
 
 ##### ACA Certificate Password (if isProvidedCert is true)
 
-- **Variable Name**: `aca-cert-password`
+- **Parameter Name**: `acaCertPassword`
 - **Type**: `string`
-- **Default Value**: `password`
+- **Default Value**: `fergEAR#FSr!eg`
+- **Note**: Specified as a secure parameter
 
 ##### ACA Dify Customer Domain (if isProvidedCert is false)
 
-- **Variable Name**: `aca-dify-customer-domain`
+- **Parameter Name**: `acaDifyCustomerDomain`
 - **Type**: `string`
-- **Default Value**: `dify.nikadwang.com`
+- **Default Value**: `dify.example.com`
+
+#### ACA App Minimum Instance Count
+
+- **Parameter Name**: `acaAppMinCount`
+- **Type**: `int`
+- **Default Value**: `1`
 
 #### Container Images
 
 ##### Dify API Image
 
-- **Variable Name**: `dify-api-image`
+- **Parameter Name**: `difyApiImage`
 - **Type**: `string`
-- **Default Value**: `langgenius/dify-api:0.6.11`
+- **Default Value**: `langgenius/dify-api:1.1.2`
 
-##### Dify Sandbox Image
+#### Dify Sandbox Image
 
-- **Variable Name**: `dify-sandbox-image`
+- **Parameter Name**: `difySandboxImage`
 - **Type**: `string`
-- **Default Value**: `langgenius/dify-sandbox:0.2.1`
+- **Default Value**: `langgenius/dify-sandbox:0.2.10`
 
 ##### Dify Web Image
 
-- **Variable Name**: `dify-web-image`
+- **Parameter Name**: `difyWebImage`
 - **Type**: `string`
-- **Default Value**: `langgenius/dify-web:0.6.11`
+- **Default Value**: `langgenius/dify-web:1.1.2`
+
+##### Dify Plugin Daemon Image
+
+- **Parameter Name**: `difyPluginDaemonImage`
+- **Type**: `string`
+- **Default Value**: `langgenius/dify-plugin-daemon:0.0.6-serverless`
