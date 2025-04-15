@@ -6,7 +6,7 @@
       "value": "japaneast"
     },
     "resourceGroupPrefix": {
-      "value": "rg-dify"
+      "value": "rg-krmt-dify"
     },
     "pgsqlUser": {
       "value": "adminuser"

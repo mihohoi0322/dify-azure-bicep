@@ -85,15 +85,9 @@ resource vectorDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@202
   }
 }
 
-// PGVector拡張の設定
-resource pgVectorConfig 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-03-01-preview' = {
-  name: 'azure.extensions'
-  parent: postgresServer
-  properties: {
-    value: 'vector'
-    source: 'user-override'
-  }
-}
+// 注: パラメータ設定はdeploy.shで行います
+// PGVector拡張と必要な拡張機能の設定はBicepから削除
+// shared_preload_librariesの設定もBicepから削除
 
 // 出力
 output serverFqdn string = postgresServer.properties.fullyQualifiedDomainName
