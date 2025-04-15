@@ -3,6 +3,9 @@ Deploy [langgenius/dify](https://github.com/langgenius/dify), an LLM based chat 
 
 > **Note**: This repository rewrites the contents of [dify-azure-terraform](https://github.com/nikawang/dify-azure-terraform) in Bicep and supports Dify 1.x.
 
+**Note**
+このリポジトリは [dify-azure-bicep](https://github.com/himanago/dify-azure-bicep) を参考に、Bash で動かすことを目的にしたリポジトリです。
+
 ### Topology
 Front-end access:
 - nginx -> Azure Container Apps (Serverless)
@@ -26,7 +29,7 @@ This document provides detailed descriptions of the variables used in the Bicep 
 ```bash
 az login
 az account set --subscription <subscription-id>
-./deploy.ps1
+./deploy.sh
 ```
 
 ### Deployment Parameters

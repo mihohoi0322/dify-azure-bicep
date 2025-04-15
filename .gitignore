@@ -1,2 +1,4 @@
 dify_admin_credentials.txt
 param.txt
+__azurite_db_blob__.json
+__azurite_db_blob_extent__.json
