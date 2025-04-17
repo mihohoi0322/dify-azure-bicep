@@ -211,6 +211,11 @@ echo "Nginxディレクトリを作成..."
 az storage directory create --name "conf.d" --share-name "$nginxShareName" --connection-string "$connectionString"
 az storage directory create --name "modules" --share-name "$nginxShareName" --connection-string "$connectionString"
 
+# 一時ディレクトリを作成して、ファイルの改行コードを修正
+echo "ファイルの改行コードを修正するための一時ディレクトリを作成..."
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
 # Nginxの設定ファイルをアップロード
 echo "Nginxの設定ファイルをアップロード中..."
 # 通常のファイルをアップロード
@@ -218,7 +223,13 @@ for file in mountfiles/nginx/*.conf mountfiles/nginx/mime.types; do
   if [ -f "$file" ]; then
     filename=$(basename "$file")
     echo "ファイルをアップロード: $filename"
-    az storage file upload --source "$file" --share-name "$nginxShareName" --path "$filename" --connection-string "$connectionString"
+    
+    # 改行コードを修正
+    TEMP_FILE="$TEMP_DIR/$filename"
+    tr -d '\r' < "$file" > "$TEMP_FILE"
+    
+    # 修正したファイルをアップロード
+    az storage file upload --source "$TEMP_FILE" --share-name "$nginxShareName" --path "$filename" --connection-string "$connectionString"
   fi
 done
 
@@ -228,20 +239,22 @@ for param_file in "fastcgi_params" "scgi_params" "uwsgi_params"; do
   
   if [ -f "$full_path" ]; then
     echo "特殊ファイルをアップロード: ${param_file}"
+    
+    # 改行コードを修正
+    TEMP_FILE="$TEMP_DIR/${param_file}"
+    tr -d '\r' < "$full_path" > "$TEMP_FILE"
+    
     # base64エンコード（macOSとLinuxで互換性のある方法）
     if [[ "$OSTYPE" == "darwin"* ]]; then
       # macOS
-      base64 < "$full_path" > "${full_path}.b64"
+      base64 < "$TEMP_FILE" > "${TEMP_FILE}.b64"
     else
       # Linux
-      base64 "$full_path" > "${full_path}.b64"
+      base64 "$TEMP_FILE" > "${TEMP_FILE}.b64"
     fi
     
     # エンコードしたファイルをアップロード
-    az storage file upload --source "${full_path}.b64" --share-name "$nginxShareName" --path "${param_file}.b64" --connection-string "$connectionString"
-    
-    # 一時ファイルを削除
-    rm "${full_path}.b64"
+    az storage file upload --source "${TEMP_FILE}.b64" --share-name "$nginxShareName" --path "${param_file}.b64" --connection-string "$connectionString"
   else
     echo "警告: ファイル ${full_path} が見つかりません。スキップします。"
   fi
@@ -254,7 +267,12 @@ if [ -d "mountfiles/nginx/conf.d" ]; then
     if [ -f "$file" ]; then
       filename=$(basename "$file")
       echo "ファイルをアップロード: conf.d/$filename"
-      az storage file upload --source "$file" --share-name "$nginxShareName" --path "conf.d/$filename" --connection-string "$connectionString"
+      
+      # 改行コードを修正
+      TEMP_FILE="$TEMP_DIR/$filename"
+      tr -d '\r' < "$file" > "$TEMP_FILE"
+      
+      az storage file upload --source "$TEMP_FILE" --share-name "$nginxShareName" --path "conf.d/$filename" --connection-string "$connectionString"
     fi
   done
 else
@@ -282,13 +300,21 @@ az storage directory create --name "conf.d" --share-name "$ssrfProxyShareName" -
 # SSRFプロキシの設定ファイルをアップロード
 echo "SSRFプロキシの設定ファイルをアップロード中..."
 if [ -f "mountfiles/ssrfproxy/squid.conf" ]; then
-  az storage file upload --source "mountfiles/ssrfproxy/squid.conf" --share-name "$ssrfProxyShareName" --path "squid.conf" --connection-string "$connectionString"
+  # 改行コードを修正
+  TEMP_FILE="$TEMP_DIR/squid.conf"
+  tr -d '\r' < "mountfiles/ssrfproxy/squid.conf" > "$TEMP_FILE"
+  
+  az storage file upload --source "$TEMP_FILE" --share-name "$ssrfProxyShareName" --path "squid.conf" --connection-string "$connectionString"
 else
   echo "警告: squid.confファイルが見つかりません。"
 fi
 
 if [ -f "mountfiles/ssrfproxy/errorpage.css" ]; then
-  az storage file upload --source "mountfiles/ssrfproxy/errorpage.css" --share-name "$ssrfProxyShareName" --path "errorpage.css" --connection-string "$connectionString"
+  # 改行コードを修正
+  TEMP_FILE="$TEMP_DIR/errorpage.css"
+  tr -d '\r' < "mountfiles/ssrfproxy/errorpage.css" > "$TEMP_FILE"
+  
+  az storage file upload --source "$TEMP_FILE" --share-name "$ssrfProxyShareName" --path "errorpage.css" --connection-string "$connectionString"
 else
   echo "警告: errorpage.cssファイルが見つかりません。"
 fi
@@ -300,7 +326,12 @@ if [ -d "mountfiles/ssrfproxy/conf.d" ]; then
     if [ -f "$file" ]; then
       filename=$(basename "$file")
       echo "ファイルをアップロード: conf.d/$filename"
-      az storage file upload --source "$file" --share-name "$ssrfProxyShareName" --path "conf.d/$filename" --connection-string "$connectionString"
+      
+      # 改行コードを修正
+      TEMP_FILE="$TEMP_DIR/$filename"
+      tr -d '\r' < "$file" > "$TEMP_FILE"
+      
+      az storage file upload --source "$TEMP_FILE" --share-name "$ssrfProxyShareName" --path "conf.d/$filename" --connection-string "$connectionString"
     fi
   done
 else
@@ -310,7 +341,11 @@ fi
 # Sandbox用の設定ファイルをアップロード
 echo "Sandboxの設定ファイルをアップロード中..."
 if [ -f "mountfiles/sandbox/python-requirements.txt" ]; then
-  az storage file upload --source "mountfiles/sandbox/python-requirements.txt" --share-name "$sandboxShareName" --path "python-requirements.txt" --connection-string "$connectionString"
+  # 改行コードを修正
+  TEMP_FILE="$TEMP_DIR/python-requirements.txt"
+  tr -d '\r' < "mountfiles/sandbox/python-requirements.txt" > "$TEMP_FILE"
+  
+  az storage file upload --source "$TEMP_FILE" --share-name "$sandboxShareName" --path "python-requirements.txt" --connection-string "$connectionString"
 else
   echo "警告: python-requirements.txtファイルが見つかりません。"
 fi
