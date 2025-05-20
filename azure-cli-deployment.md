@@ -4,10 +4,25 @@
 
 ## 前提条件
 
-- Azure CLI がインストールされていること
-- jq がインストールされていること（パラメータ処理用）
+- Azure CLI がインストールされていること (`az --version` で確認)
+- jq がインストールされていること (`jq --version` で確認)
 - 有効な Azure サブスクリプション
 - パラメータファイル（parameters.json）が存在すること
+- ファイル共有にアップロードするための設定ファイルが「mountfiles」ディレクトリに存在すること
+
+## デプロイの概要
+
+このドキュメントに記載されているコマンドは、以下のリソースを作成します：
+
+1. リソースグループ
+2. 仮想ネットワークとサブネット（プライベートリンク、ACA、PostgreSQL用）
+3. ストレージアカウントとプライベートエンドポイント
+4. ファイル共有（Nginx、Sandbox、SSRFプロキシ、プラグイン用）
+5. PostgreSQLフレキシブルサーバーとデータベース
+6. Redis Cache（オプション）
+7. Azure Container Apps環境
+8. 各種コンテナアプリ（Nginx、SSRFプロキシ、Sandbox、API、Worker、Web）
+9. 設定ファイルのアップロードと初期設定
 
 ## パラメータの読み込み
 
@@ -796,7 +811,145 @@ echo "https://$DIFY_URL"
 echo "==============================================="
 ```
 
-## 16. データベース拡張機能のセットアップ（psqlコマンドがある場合）
+## 16. 設定ファイルのアップロード
+
+次の手順では、Nginx、SSRFプロキシ、Sandboxなどの設定ファイルをアップロードします。これらのファイルは、`deploy.sh` スクリプトの中でもアップロードされています。
+
+```bash
+# 一時ディレクトリを作成
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# Nginxの設定ファイルをアップロード
+echo "Nginxの設定ファイルをアップロード中..."
+for file in mountfiles/nginx/*.conf mountfiles/nginx/mime.types; do
+  if [ -f "$file" ]; then
+    filename=$(basename "$file")
+    echo "ファイルをアップロード: $filename"
+    
+    # 改行コードを修正
+    TEMP_FILE="$TEMP_DIR/$filename"
+    tr -d '\r' < "$file" > "$TEMP_FILE"
+    
+    # 修正したファイルをアップロード
+    az storage file upload --source "$TEMP_FILE" --share-name "$NGINX_SHARE_NAME" \
+      --path "$filename" --connection-string "$CONNECTION_STRING"
+  fi
+done
+
+# 特殊パラメータファイルをチェックして処理
+for param_file in "fastcgi_params" "scgi_params" "uwsgi_params"; do
+  full_path="mountfiles/nginx/${param_file}"
+  
+  if [ -f "$full_path" ]; then
+    echo "特殊ファイルをアップロード: ${param_file}"
+    
+    # 改行コードを修正
+    TEMP_FILE="$TEMP_DIR/${param_file}"
+    tr -d '\r' < "$full_path" > "$TEMP_FILE"
+    
+    # base64エンコード
+    base64 "$TEMP_FILE" > "${TEMP_FILE}.b64"
+    
+    # エンコードしたファイルをアップロード
+    az storage file upload --source "${TEMP_FILE}.b64" --share-name "$NGINX_SHARE_NAME" \
+      --path "${param_file}.b64" --connection-string "$CONNECTION_STRING"
+  fi
+done
+
+# conf.dディレクトリのファイルをアップロード
+echo "conf.dディレクトリのファイルをアップロード中..."
+if [ -d "mountfiles/nginx/conf.d" ]; then
+  # conf.dディレクトリを作成
+  az storage directory create --name "conf.d" --share-name "$NGINX_SHARE_NAME" \
+    --connection-string "$CONNECTION_STRING"
+  
+  for file in mountfiles/nginx/conf.d/*; do
+    if [ -f "$file" ]; then
+      filename=$(basename "$file")
+      echo "ファイルをアップロード: conf.d/$filename"
+      
+      # 改行コードを修正
+      TEMP_FILE="$TEMP_DIR/$filename"
+      tr -d '\r' < "$file" > "$TEMP_FILE"
+      
+      az storage file upload --source "$TEMP_FILE" --share-name "$NGINX_SHARE_NAME" \
+        --path "conf.d/$filename" --connection-string "$CONNECTION_STRING"
+    fi
+  done
+fi
+
+# modulesディレクトリのファイルをアップロード
+echo "modulesディレクトリのファイルをアップロード中..."
+if [ -d "mountfiles/nginx/modules" ]; then
+  # modulesディレクトリを作成
+  az storage directory create --name "modules" --share-name "$NGINX_SHARE_NAME" \
+    --connection-string "$CONNECTION_STRING"
+  
+  for file in mountfiles/nginx/modules/*; do
+    if [ -f "$file" ]; then
+      filename=$(basename "$file")
+      echo "ファイルをアップロード: modules/$filename"
+      az storage file upload --source "$file" --share-name "$NGINX_SHARE_NAME" \
+        --path "modules/$filename" --connection-string "$CONNECTION_STRING"
+    fi
+  done
+fi
+
+# SSRFプロキシの設定ファイルをアップロード
+echo "SSRFプロキシの設定ファイルをアップロード中..."
+# conf.dディレクトリを作成
+az storage directory create --name "conf.d" --share-name "$SSRFPROXY_SHARE_NAME" \
+  --connection-string "$CONNECTION_STRING"
+
+if [ -f "mountfiles/ssrfproxy/squid.conf" ]; then
+  # 改行コードを修正
+  TEMP_FILE="$TEMP_DIR/squid.conf"
+  tr -d '\r' < "mountfiles/ssrfproxy/squid.conf" > "$TEMP_FILE"
+  
+  az storage file upload --source "$TEMP_FILE" --share-name "$SSRFPROXY_SHARE_NAME" \
+    --path "squid.conf" --connection-string "$CONNECTION_STRING"
+fi
+
+if [ -f "mountfiles/ssrfproxy/errorpage.css" ]; then
+  # 改行コードを修正
+  TEMP_FILE="$TEMP_DIR/errorpage.css"
+  tr -d '\r' < "mountfiles/ssrfproxy/errorpage.css" > "$TEMP_FILE"
+  
+  az storage file upload --source "$TEMP_FILE" --share-name "$SSRFPROXY_SHARE_NAME" \
+    --path "errorpage.css" --connection-string "$CONNECTION_STRING"
+fi
+
+# SSRFプロキシのconf.dディレクトリのファイルをアップロード
+if [ -d "mountfiles/ssrfproxy/conf.d" ]; then
+  for file in mountfiles/ssrfproxy/conf.d/*; do
+    if [ -f "$file" ]; then
+      filename=$(basename "$file")
+      echo "ファイルをアップロード: conf.d/$filename"
+      
+      # 改行コードを修正
+      TEMP_FILE="$TEMP_DIR/$filename"
+      tr -d '\r' < "$file" > "$TEMP_FILE"
+      
+      az storage file upload --source "$TEMP_FILE" --share-name "$SSRFPROXY_SHARE_NAME" \
+        --path "conf.d/$filename" --connection-string "$CONNECTION_STRING"
+    fi
+  done
+fi
+
+# Sandbox用の設定ファイルをアップロード
+echo "Sandboxの設定ファイルをアップロード中..."
+if [ -f "mountfiles/sandbox/python-requirements.txt" ]; then
+  # 改行コードを修正
+  TEMP_FILE="$TEMP_DIR/python-requirements.txt"
+  tr -d '\r' < "mountfiles/sandbox/python-requirements.txt" > "$TEMP_FILE"
+  
+  az storage file upload --source "$TEMP_FILE" --share-name "$SANDBOX_SHARE_NAME" \
+    --path "python-requirements.txt" --connection-string "$CONNECTION_STRING"
+fi
+```
+
+## 17. データベース拡張機能のセットアップ（psqlコマンドがある場合）
 
 ```bash
 # psqlコマンドが必要です
@@ -810,8 +963,31 @@ PGPASSWORD="$PGSQL_PASSWORD" psql -h "$POSTGRES_SERVER_FQDN" -U "$PGSQL_USER" -d
 
 ## 注意事項
 
-1. このスクリプトは、Bicepテンプレートを使用する代わりにAzure CLIコマンドでリソースを作成します。
+1. このドキュメントは、Bicepテンプレートを使用する代わりにAzure CLIコマンドでリソースを作成します。
 2. パラメータファイル（parameters.json）から値を読み込みます。
 3. 実際に実行する際は、必要に応じてパラメータやリソースのスペックを調整してください。
 4. 認証情報（パスワードなど）は必ずセキュアに管理してください。
-5. ファイル共有のマウントや設定ファイルのアップロードについては、deploy.shスクリプトの内容を参考にしてください。
+5. ファイル共有のマウントや設定ファイルのアップロードは、デプロイ後の重要なステップです。
+6. コマンドを一括して実行する場合は、上記の内容をシェルスクリプトとして保存し実行することも可能です。
+
+## トラブルシューティング
+
+1. **リソースの競合エラー**：リソース名が既に使用されている場合は、`STORAGE_ACCOUNT_BASE`や`PSQL_FLEXIBLE_BASE`などのパラメータを変更してください。
+2. **デプロイ失敗**：deploy.shスクリプトには再試行メカニズムがありますが、このドキュメントでは簡略化しています。コマンドが失敗した場合は、エラーメッセージを確認し、必要に応じて再実行してください。
+3. **ネットワーク接続の問題**：プライベートエンドポイントを使用しているため、接続の問題が発生した場合は、DNSゾーンの設定とプライベートエンドポイントの設定を確認してください。
+4. **PostgreSQLの拡張機能エラー**：拡張機能のインストールでエラーが発生する場合は、PostgreSQLサーバーの管理者権限があるか、`azure.extensions`パラメータが正しく設定されているかを確認してください。
+
+## デプロイ検証
+
+デプロイが完了したら、以下のことを確認してください：
+
+```bash
+# リソースの存在確認
+echo "必要なリソースの確認:"
+echo "1. ストレージアカウント: $(az storage account show --resource-group "$RESOURCE_GROUP_NAME" --name "$STORAGE_ACCOUNT_NAME" --query "name" -o tsv 2>/dev/null && echo "OK" || echo "未検出")"
+echo "2. PostgreSQLサーバー: $(az postgres flexible-server show --resource-group "$RESOURCE_GROUP_NAME" --name "$PSQL_SERVER_NAME" --query "name" -o tsv 2>/dev/null && echo "OK" || echo "未検出")"
+echo "3. ACA環境: $(az containerapp env show --resource-group "$RESOURCE_GROUP_NAME" --name "$ACA_ENV_NAME" --query "name" -o tsv 2>/dev/null && echo "OK" || echo "未検出")"
+echo "4. Difyアプリケーション: $(az containerapp show --resource-group "$RESOURCE_GROUP_NAME" --name "nginx" --query "name" -o tsv 2>/dev/null && echo "OK" || echo "未検出")"
+```
+
+これにて、Azure CLIを使用したDifyアプリケーションのデプロイ手順は完了です。
