@@ -449,8 +449,6 @@ az containerapp create \
   --max-replicas 10 \
   --cpu "0.5" \
   --memory "1Gi" \
-  --volume-mount-path "/custom-nginx" \
-  --volume-name "nginxshare" \
   --command "/bin/bash" \
   --arg "-c" \
   --arg "mkdir -p /etc/nginx/conf.d /etc/nginx/modules && 
@@ -549,6 +547,14 @@ fi &&
 
 echo \"設定が完了しました。Nginxを起動します...\" &&
 nginx -g \"daemon off;\""
+
+# Nginxアプリケーションにストレージをマウント
+az containerapp storage mount add \
+  --name "nginx" \
+  --resource-group "$RESOURCE_GROUP_NAME" \
+  --storage-name "nginxshare" \
+  --mount-path "/custom-nginx" \
+  --access-mode "ReadWrite"
 ```
 
 ## 10. SSRFプロキシコンテナアプリケーションのデプロイ
@@ -567,8 +573,6 @@ az containerapp create \
   --max-replicas 10 \
   --cpu "0.5" \
   --memory "1Gi" \
-  --volume-mount-path "/etc/squid" \
-  --volume-name "ssrfproxyshare" \
   --command "/bin/bash" \
   --arg "-c" \
   --arg "if [ -f \"/etc/squid/squid.conf\" ]; then
@@ -587,6 +591,14 @@ if [ -d \"/etc/squid/conf.d\" ] && [ \"$(ls -A /etc/squid/conf.d)\" ]; then
 fi &&
 echo 'Starting squid...' &&
 squid -NYC"
+
+# SSRFプロキシアプリケーションにストレージをマウント
+az containerapp storage mount add \
+  --name "ssrfproxy" \
+  --resource-group "$RESOURCE_GROUP_NAME" \
+  --storage-name "ssrfproxyshare" \
+  --mount-path "/etc/squid" \
+  --access-mode "ReadWrite"
 ```
 
 ## 11. Sandboxコンテナアプリケーションのデプロイ
@@ -611,11 +623,17 @@ az containerapp create \
     "HTTP_PROXY=http://ssrfproxy:3128" \
     "HTTPS_PROXY=http://ssrfproxy:3128" \
     "SANDBOX_PORT=8194" \
-  --volume-mount-path "/dependencies" \
-  --volume-name "sandboxshare" \
   --scale-rule-name "sandbox" \
   --scale-rule-type "tcp" \
   --scale-rule-metadata "concurrentRequests=10"
+
+# Sandboxアプリケーションにストレージをマウント
+az containerapp storage mount add \
+  --name "sandbox" \
+  --resource-group "$RESOURCE_GROUP_NAME" \
+  --storage-name "sandboxshare" \
+  --mount-path "/dependencies" \
+  --access-mode "ReadWrite"
 ```
 
 ## 12. Workerコンテナアプリケーションのデプロイ
@@ -712,11 +730,17 @@ az containerapp create \
     "PLUGIN_REMOTE_INSTALLING_ENABLED=true" \
     "PLUGIN_REMOTE_INSTALLING_HOST=127.0.0.1" \
     "PLUGIN_REMOTE_INSTALLING_PORT=5003" \
-  --volume-mount-path "/app/plugin-storage" \
-  --volume-name "pluginstorageshare" \
   --scale-rule-name "api" \
   --scale-rule-type "tcp" \
   --scale-rule-metadata "concurrentRequests=10"
+
+# APIアプリケーションにストレージをマウント
+az containerapp storage mount add \
+  --name "api" \
+  --resource-group "$RESOURCE_GROUP_NAME" \
+  --storage-name "pluginstorageshare" \
+  --mount-path "/app/plugin-storage" \
+  --access-mode "ReadWrite"
 ```
 
 ## 14. Webコンテナアプリケーションのデプロイ
