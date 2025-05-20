@@ -548,13 +548,17 @@ fi &&
 echo \"設定が完了しました。Nginxを起動します...\" &&
 nginx -g \"daemon off;\""
 
-# Nginxアプリケーションにストレージをマウント
-az containerapp storage mount add \
-  --name "nginx" \
-  --resource-group "$RESOURCE_GROUP_NAME" \
-  --storage-name "nginxshare" \
-  --mount-path "/custom-nginx" \
-  --access-mode "ReadWrite"
+# ストレージマウントを含むNginxアプリケーションの更新
+# 注: 環境にストレージを設定した後、コンテナアプリにマウントする方法は環境によって異なります。
+# 現在、Azure CLIではコンテナアプリケーションにストレージをマウントする直接的なコマンドは提供されていません。
+# 以下のいずれかの方法を使用してください:
+# 1. Azure Portal を使用してマウントを設定する
+# 2. YAML定義ファイルを使用してアプリケーションを更新する
+# 3. Azure Resource Manager (ARM) テンプレートを使用する
+# 4. Azure RESTful API を使用する
+#
+# 詳細なガイダンスについては次のドキュメントを参照してください:
+# https://learn.microsoft.com/azure/container-apps/storage-mounts
 ```
 
 ## 10. SSRFプロキシコンテナアプリケーションのデプロイ
@@ -592,13 +596,17 @@ fi &&
 echo 'Starting squid...' &&
 squid -NYC"
 
-# SSRFプロキシアプリケーションにストレージをマウント
-az containerapp storage mount add \
-  --name "ssrfproxy" \
-  --resource-group "$RESOURCE_GROUP_NAME" \
-  --storage-name "ssrfproxyshare" \
-  --mount-path "/etc/squid" \
-  --access-mode "ReadWrite"
+# ストレージマウントを含むSSRFプロキシアプリケーションの更新
+# 注: 環境にストレージを設定した後、コンテナアプリにマウントする方法は環境によって異なります。
+# 現在、Azure CLIではコンテナアプリケーションにストレージをマウントする直接的なコマンドは提供されていません。
+# 以下のいずれかの方法を使用してください:
+# 1. Azure Portal を使用してマウントを設定する
+# 2. YAML定義ファイルを使用してアプリケーションを更新する
+# 3. Azure Resource Manager (ARM) テンプレートを使用する
+# 4. Azure RESTful API を使用する
+#
+# 詳細なガイダンスについては次のドキュメントを参照してください:
+# https://learn.microsoft.com/azure/container-apps/storage-mounts
 ```
 
 ## 11. Sandboxコンテナアプリケーションのデプロイ
@@ -627,13 +635,17 @@ az containerapp create \
   --scale-rule-type "tcp" \
   --scale-rule-metadata "concurrentRequests=10"
 
-# Sandboxアプリケーションにストレージをマウント
-az containerapp storage mount add \
-  --name "sandbox" \
-  --resource-group "$RESOURCE_GROUP_NAME" \
-  --storage-name "sandboxshare" \
-  --mount-path "/dependencies" \
-  --access-mode "ReadWrite"
+# ストレージマウントを含むSandboxアプリケーションの更新
+# 注: 環境にストレージを設定した後、コンテナアプリにマウントする方法は環境によって異なります。
+# 現在、Azure CLIではコンテナアプリケーションにストレージをマウントする直接的なコマンドは提供されていません。
+# 以下のいずれかの方法を使用してください:
+# 1. Azure Portal を使用してマウントを設定する
+# 2. YAML定義ファイルを使用してアプリケーションを更新する
+# 3. Azure Resource Manager (ARM) テンプレートを使用する
+# 4. Azure RESTful API を使用する
+#
+# 詳細なガイダンスについては次のドキュメントを参照してください:
+# https://learn.microsoft.com/azure/container-apps/storage-mounts
 ```
 
 ## 12. Workerコンテナアプリケーションのデプロイ
@@ -734,13 +746,17 @@ az containerapp create \
   --scale-rule-type "tcp" \
   --scale-rule-metadata "concurrentRequests=10"
 
-# APIアプリケーションにストレージをマウント
-az containerapp storage mount add \
-  --name "api" \
-  --resource-group "$RESOURCE_GROUP_NAME" \
-  --storage-name "pluginstorageshare" \
-  --mount-path "/app/plugin-storage" \
-  --access-mode "ReadWrite"
+# ストレージマウントを含むAPIアプリケーションの更新
+# 注: 環境にストレージを設定した後、コンテナアプリにマウントする方法は環境によって異なります。
+# 現在、Azure CLIではコンテナアプリケーションにストレージをマウントする直接的なコマンドは提供されていません。
+# 以下のいずれかの方法を使用してください:
+# 1. Azure Portal を使用してマウントを設定する
+# 2. YAML定義ファイルを使用してアプリケーションを更新する
+# 3. Azure Resource Manager (ARM) テンプレートを使用する
+# 4. Azure RESTful API を使用する
+#
+# 詳細なガイダンスについては次のドキュメントを参照してください:
+# https://learn.microsoft.com/azure/container-apps/storage-mounts
 ```
 
 ## 14. Webコンテナアプリケーションのデプロイ
@@ -1000,6 +1016,7 @@ PGPASSWORD="$PGSQL_PASSWORD" psql -h "$POSTGRES_SERVER_FQDN" -U "$PGSQL_USER" -d
 2. **デプロイ失敗**：deploy.shスクリプトには再試行メカニズムがありますが、このドキュメントでは簡略化しています。コマンドが失敗した場合は、エラーメッセージを確認し、必要に応じて再実行してください。
 3. **ネットワーク接続の問題**：プライベートエンドポイントを使用しているため、接続の問題が発生した場合は、DNSゾーンの設定とプライベートエンドポイントの設定を確認してください。
 4. **PostgreSQLの拡張機能エラー**：拡張機能のインストールでエラーが発生する場合は、PostgreSQLサーバーの管理者権限があるか、`azure.extensions`パラメータが正しく設定されているかを確認してください。
+5. **ストレージマウント**: Azure CLI では現在、コンテナアプリにストレージを直接マウントするためのコマンドが提供されていません。ストレージマウントが必要な場合は、Azure Portal、YAML定義ファイル、ARMテンプレート、または Azure REST APIを使用してマウントを設定してください。
 
 ## デプロイ検証
 
