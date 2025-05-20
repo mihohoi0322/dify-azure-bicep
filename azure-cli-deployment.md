@@ -549,16 +549,28 @@ echo \"設定が完了しました。Nginxを起動します...\" &&
 nginx -g \"daemon off;\""
 
 # ストレージマウントを含むNginxアプリケーションの更新
-# 注: 環境にストレージを設定した後、コンテナアプリにマウントする方法は環境によって異なります。
-# 現在、Azure CLIではコンテナアプリケーションにストレージをマウントする直接的なコマンドは提供されていません。
-# 以下のいずれかの方法を使用してください:
-# 1. Azure Portal を使用してマウントを設定する
-# 2. YAML定義ファイルを使用してアプリケーションを更新する
-# 3. Azure Resource Manager (ARM) テンプレートを使用する
-# 4. Azure RESTful API を使用する
-#
-# 詳細なガイダンスについては次のドキュメントを参照してください:
-# https://learn.microsoft.com/azure/container-apps/storage-mounts
+# YAMLを使用してストレージマウントを設定
+# 1. YAML定義ファイルを作成
+cat > nginx-update.yaml << EOF
+properties:
+  configuration:
+    ingress:
+      external: true
+      targetPort: 80
+      transport: auto
+  template:
+    volumes:
+      - name: "nginxshare"
+        storageName: "nginxshare"
+        storageType: "AzureFile"
+        mountPath: "/custom-nginx"
+EOF
+
+# 2. YAMLファイルを使用してコンテナアプリを更新
+az containerapp update \
+  --name "nginx" \
+  --resource-group "$RESOURCE_GROUP_NAME" \
+  --yaml nginx-update.yaml
 ```
 
 ## 10. SSRFプロキシコンテナアプリケーションのデプロイ
@@ -597,16 +609,28 @@ echo 'Starting squid...' &&
 squid -NYC"
 
 # ストレージマウントを含むSSRFプロキシアプリケーションの更新
-# 注: 環境にストレージを設定した後、コンテナアプリにマウントする方法は環境によって異なります。
-# 現在、Azure CLIではコンテナアプリケーションにストレージをマウントする直接的なコマンドは提供されていません。
-# 以下のいずれかの方法を使用してください:
-# 1. Azure Portal を使用してマウントを設定する
-# 2. YAML定義ファイルを使用してアプリケーションを更新する
-# 3. Azure Resource Manager (ARM) テンプレートを使用する
-# 4. Azure RESTful API を使用する
-#
-# 詳細なガイダンスについては次のドキュメントを参照してください:
-# https://learn.microsoft.com/azure/container-apps/storage-mounts
+# YAMLを使用してストレージマウントを設定
+# 1. YAML定義ファイルを作成
+cat > ssrfproxy-update.yaml << EOF
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 3128
+      transport: tcp
+  template:
+    volumes:
+      - name: "ssrfproxyshare"
+        storageName: "ssrfproxyshare"
+        storageType: "AzureFile"
+        mountPath: "/etc/squid"
+EOF
+
+# 2. YAMLファイルを使用してコンテナアプリを更新
+az containerapp update \
+  --name "ssrfproxy" \
+  --resource-group "$RESOURCE_GROUP_NAME" \
+  --yaml ssrfproxy-update.yaml
 ```
 
 ## 11. Sandboxコンテナアプリケーションのデプロイ
@@ -636,16 +660,28 @@ az containerapp create \
   --scale-rule-metadata "concurrentRequests=10"
 
 # ストレージマウントを含むSandboxアプリケーションの更新
-# 注: 環境にストレージを設定した後、コンテナアプリにマウントする方法は環境によって異なります。
-# 現在、Azure CLIではコンテナアプリケーションにストレージをマウントする直接的なコマンドは提供されていません。
-# 以下のいずれかの方法を使用してください:
-# 1. Azure Portal を使用してマウントを設定する
-# 2. YAML定義ファイルを使用してアプリケーションを更新する
-# 3. Azure Resource Manager (ARM) テンプレートを使用する
-# 4. Azure RESTful API を使用する
-#
-# 詳細なガイダンスについては次のドキュメントを参照してください:
-# https://learn.microsoft.com/azure/container-apps/storage-mounts
+# YAMLを使用してストレージマウントを設定
+# 1. YAML定義ファイルを作成
+cat > sandbox-update.yaml << EOF
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 8194
+      transport: tcp
+  template:
+    volumes:
+      - name: "sandboxshare"
+        storageName: "sandboxshare"
+        storageType: "AzureFile"
+        mountPath: "/data"
+EOF
+
+# 2. YAMLファイルを使用してコンテナアプリを更新
+az containerapp update \
+  --name "sandbox" \
+  --resource-group "$RESOURCE_GROUP_NAME" \
+  --yaml sandbox-update.yaml
 ```
 
 ## 12. Workerコンテナアプリケーションのデプロイ
@@ -747,16 +783,28 @@ az containerapp create \
   --scale-rule-metadata "concurrentRequests=10"
 
 # ストレージマウントを含むAPIアプリケーションの更新
-# 注: 環境にストレージを設定した後、コンテナアプリにマウントする方法は環境によって異なります。
-# 現在、Azure CLIではコンテナアプリケーションにストレージをマウントする直接的なコマンドは提供されていません。
-# 以下のいずれかの方法を使用してください:
-# 1. Azure Portal を使用してマウントを設定する
-# 2. YAML定義ファイルを使用してアプリケーションを更新する
-# 3. Azure Resource Manager (ARM) テンプレートを使用する
-# 4. Azure RESTful API を使用する
-#
-# 詳細なガイダンスについては次のドキュメントを参照してください:
-# https://learn.microsoft.com/azure/container-apps/storage-mounts
+# YAMLを使用してストレージマウントを設定
+# 1. YAML定義ファイルを作成
+cat > api-update.yaml << EOF
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 5001
+      transport: tcp
+  template:
+    volumes:
+      - name: "pluginstorageshare"
+        storageName: "pluginstorageshare"
+        storageType: "AzureFile"
+        mountPath: "/app/plugins"
+EOF
+
+# 2. YAMLファイルを使用してコンテナアプリを更新
+az containerapp update \
+  --name "api" \
+  --resource-group "$RESOURCE_GROUP_NAME" \
+  --yaml api-update.yaml
 ```
 
 ## 14. Webコンテナアプリケーションのデプロイ
@@ -1016,7 +1064,10 @@ PGPASSWORD="$PGSQL_PASSWORD" psql -h "$POSTGRES_SERVER_FQDN" -U "$PGSQL_USER" -d
 2. **デプロイ失敗**：deploy.shスクリプトには再試行メカニズムがありますが、このドキュメントでは簡略化しています。コマンドが失敗した場合は、エラーメッセージを確認し、必要に応じて再実行してください。
 3. **ネットワーク接続の問題**：プライベートエンドポイントを使用しているため、接続の問題が発生した場合は、DNSゾーンの設定とプライベートエンドポイントの設定を確認してください。
 4. **PostgreSQLの拡張機能エラー**：拡張機能のインストールでエラーが発生する場合は、PostgreSQLサーバーの管理者権限があるか、`azure.extensions`パラメータが正しく設定されているかを確認してください。
-5. **ストレージマウント**: Azure CLI では現在、コンテナアプリにストレージを直接マウントするためのコマンドが提供されていません。ストレージマウントが必要な場合は、Azure Portal、YAML定義ファイル、ARMテンプレート、または Azure REST APIを使用してマウントを設定してください。
+5. **ストレージマウント**: Azure CLIではコンテナアプリケーションにストレージを直接マウントする単一のコマンドがありませんが、YAMLファイルを使用してストレージマウントを設定できます。もしYAMLファイルの適用中にエラーが発生した場合は、以下を確認してください：
+   - コンテナアプリ環境にストレージが正しく設定されているか（`az containerapp env storage set`コマンドが成功しているか）
+   - YAMLファイル内のプロパティ構造が適切か
+   - ストレージ名（`storageName`）とコンテナアプリ環境のストレージ名が一致しているか
 
 ## デプロイ検証
 
