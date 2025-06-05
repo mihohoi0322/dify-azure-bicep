@@ -156,7 +156,9 @@ $STORAGE_ACCOUNT_KEY = az storage account keys list --resource-group "$RESOURCE_
 
 # Blob用プライベートDNSゾーンの作成
 # 正しいsuffixを取得
-$STORAGE_SUFFIX = az cloud show --query "suffixes.storageEndpoint" -o tsv | sed 's|https://||' | sed 's|/$||'
+$STORAGE_SUFFIX = az cloud show --query "suffixes.storageEndpoint" -o tsv
+$STORAGE_SUFFIX = $STORAGE_SUFFIX -replace '^https://', ''
+$STORAGE_SUFFIX = $STORAGE_SUFFIX -replace '/$', ''
 $BLOB_DNS_ZONE = "privatelink.blob.${STORAGE_SUFFIX}"
 $FILE_DNS_ZONE = "privatelink.file.${STORAGE_SUFFIX}"
 
