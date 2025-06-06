@@ -988,9 +988,9 @@ try {
     
     # PostgreSQLサーバーのファイアウォールにクライアントIPを追加
     az postgres flexible-server firewall-rule create `
-      --rule-name "ClientIPAccess" `
+      -- "ClientIPAccess" `
       --resource-group "$RESOURCE_GROUP_NAME" `
-      --server-name "$PSQL_SERVER_NAME" `
+      --name "$PSQL_SERVER_NAME" `
       --start-ip-address "$CLIENT_IP" `
       --end-ip-address "$CLIENT_IP"
 } catch {
