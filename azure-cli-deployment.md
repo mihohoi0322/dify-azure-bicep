@@ -117,6 +117,7 @@ az network vnet subnet create `
   --vnet-name "vnet-$LOCATION" `
   --name "ACASubnet" `
   --address-prefix "${IP_PREFIX}.2.0/23"
+  --delegations "Microsoft.App/environments"
 
 # PostgreSQL用サブネット作成
 az network vnet subnet create `
@@ -387,7 +388,7 @@ if ($IS_ACA_ENABLED -eq $true) {
 
 ```powershell
 # Log Analytics workspaceの作成
-az monitor.log-analytics workspace create `
+az monitor log-analytics workspace create `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --workspace-name "$ACA_LOGA_NAME" `
   --location "$LOCATION"
