@@ -457,22 +457,9 @@ if ($IS_PROVIDED_CERT -eq $true) {
 ## 9. Nginxコンテナアプリケーションのデプロイ
 
 ```powershell
-# nginxアプリケーションの作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "nginx" `
-  --environment "$ACA_ENV_NAME" `
-  --image "nginx:latest" `
-  --ingress "external" `
-  --target-port 80 `
-  --transport "auto" `
-  --min-replicas "$ACA_APP_MIN_COUNT" `
-  --max-replicas 10 `
-  --cpu "0.5" `
-  --memory "1Gi" `
-  --command "/bin/bash" `
-  --arg "-c" `
-  --arg "mkdir -p /etc/nginx/conf.d /etc/nginx/modules && 
+# nginx起動コマンドの定義
+$NGINX_COMMAND = @"
+mkdir -p /etc/nginx/conf.d /etc/nginx/modules && 
 for encoded_file in /custom-nginx/*.b64; do
   if [ -f \"$encoded_file\" ]; then
     dest_file=\"/etc/nginx/$(basename \"$encoded_file\" .b64)\"
@@ -567,7 +554,24 @@ if [ -d \"/custom-nginx/modules\" ] && [ \"$(ls -A /custom-nginx/modules)\" ]; t
 fi &&
 
 echo \"設定が完了しました。Nginxを起動します...\" &&
-nginx -g \"daemon off;\""
+nginx -g \"daemon off;\"
+"@
+
+# nginxアプリケーションの作成
+az containerapp create `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "nginx" `
+  --environment "$ACA_ENV_NAME" `
+  --image "nginx:latest" `
+  --ingress "external" `
+  --target-port 80 `
+  --transport "auto" `
+  --min-replicas "$ACA_APP_MIN_COUNT" `
+  --max-replicas 10 `
+  --cpu "0.5" `
+  --memory "1Gi" `
+  --command "/bin/bash -c" `
+  --arg $NGINX_COMMAND
 
 # 1. 基本設定ファイルを作成（ストレージマウント設定を含む）
 cat > nginx-config.yaml << 'EOF'
@@ -663,7 +667,7 @@ properties:
       - name: nginxshare
         storageName: nginxshare
         storageType: AzureFile
-EOF
+'@ | Set-Content -Encoding String nginx-config.yaml
 
 # 2. ストレージキーを設定
 az containerapp update `
@@ -675,22 +679,9 @@ az containerapp update `
 ## 10. SSRFプロキシコンテナアプリケーションのデプロイ
 
 ```powershell
-# SSRFプロキシアプリケーションの作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "ssrfproxy" `
-  --environment "$ACA_ENV_NAME" `
-  --image "ubuntu/squid:latest" `
-  --ingress "internal" `
-  --target-port 3128 `
-  --transport "tcp" `
-  --min-replicas "$ACA_APP_MIN_COUNT" `
-  --max-replicas 10 `
-  --cpu "0.5" `
-  --memory "1Gi" `
-  --command "/bin/bash" `
-  --arg "-c" `
-  --arg "if [ -f \"/etc/squid/squid.conf\" ]; then
+# SSRFプロキシの起動コマンド
+$SSRF_PROXY_COMMAND = @'
+"if [ -f \"/etc/squid/squid.conf\" ]; then
   echo 'Using custom squid.conf'
   cp /etc/squid/squid.conf /etc/squid/squid.conf.default
 fi &&
@@ -706,11 +697,28 @@ if [ -d \"/etc/squid/conf.d\" ] && [ \"$(ls -A /etc/squid/conf.d)\" ]; then
 fi &&
 echo 'Starting squid...' &&
 squid -NYC"
+'@
+
+# SSRFプロキシアプリケーションの作成
+az containerapp create `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "ssrfproxy" `
+  --environment "$ACA_ENV_NAME" `
+  --image "ubuntu/squid:latest" `
+  --ingress "internal" `
+  --target-port 3128 `
+  --transport "tcp" `
+  --min-replicas "$ACA_APP_MIN_COUNT" `
+  --max-replicas 10 `
+  --cpu "0.5" `
+  --memory "1Gi" `
+  --command "/bin/bash -c" `
+  --arg "$SSRF_PROXY_COMMAND"
 
 # ストレージマウントを含むSSRFプロキシアプリケーションの更新
 # YAMLを使用してストレージマウントを設定
 # 1. YAML定義ファイルを作成
-cat > ssrfproxy-update.yaml << EOF
+@'
 properties:
   configuration:
     ingress:
@@ -723,7 +731,7 @@ properties:
         storageName: "ssrfproxyshare"
         storageType: "AzureFile"
         mountPath: "/etc/squid"
-EOF
+'@ | Set-Content -Encoding String ssrfproxy-update.yaml
 
 # 2. YAMLファイルを使用してコンテナアプリを更新
 az containerapp update `
@@ -761,7 +769,7 @@ az containerapp create `
 # ストレージマウントを含むSandboxアプリケーションの更新
 # YAMLを使用してストレージマウントを設定
 # 1. YAML定義ファイルを作成
-cat > sandbox-update.yaml << EOF
+@'
 properties:
   configuration:
     ingress:
@@ -774,7 +782,7 @@ properties:
         storageName: "sandboxshare"
         storageType: "AzureFile"
         mountPath: "/data"
-EOF
+'@ | Set-Content -Encoding String sandbox-update.yaml
 
 # 2. YAMLファイルを使用してコンテナアプリを更新
 az containerapp update `
@@ -906,7 +914,7 @@ properties:
 "@
 
 # YAML設定をファイルに出力
-$apiConfigYaml | Out-File -FilePath "api-update.yaml" -Encoding UTF8
+$apiConfigYaml | Out-File -FilePath "api-update.yaml" -Encoding String
 
 # YAMLファイルを使用してコンテナアプリを更新
 az containerapp update `
@@ -973,7 +981,7 @@ try {
     
     # PostgreSQLサーバーのファイアウォールにクライアントIPを追加
     az postgres flexible-server firewall-rule create `
-      --name "ClientIPAccess" `
+      --rule-name "ClientIPAccess" `
       --resource-group "$RESOURCE_GROUP_NAME" `
       --server-name "$PSQL_SERVER_NAME" `
       --start-ip-address "$CLIENT_IP" `
