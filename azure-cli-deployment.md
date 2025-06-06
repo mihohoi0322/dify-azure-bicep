@@ -353,7 +353,6 @@ if ($IS_ACA_ENABLED -eq $true) {
       --vm-size "C0" `
       --enable-non-ssl-port `
       --minimum-tls-version "1.2" `
-      --public-network-access "Disabled" `
       --redis-version "6"
     
     # RedisリソースIDの取得
