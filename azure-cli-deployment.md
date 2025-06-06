@@ -574,7 +574,7 @@ az containerapp create `
   --arg $NGINX_COMMAND
 
 # 1. 基本設定ファイルを作成（ストレージマウント設定を含む）
-cat > nginx-config.yaml << 'EOF'
+@'
 properties:
   configuration:
     ingress:
@@ -583,7 +583,7 @@ properties:
       transport: auto
     secrets:
       - name: "storage-key"
-        value: ""  # 実際の値は後で設定
+        value: "<placeholder for $STORAGE_ACCOUNT_KEY>"
   template:
     containers:
       - name: nginx
@@ -669,11 +669,18 @@ properties:
         storageType: AzureFile
 '@ | Set-Content -Encoding String nginx-config.yaml
 
-# 2. ストレージキーを設定
+# 2. 基本設定ファイルを使用してコンテナアプリを更新
 az containerapp update `
   --name "nginx" `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --yaml nginx-config.yaml
+
+# 3. ストレージアカウントキーをシークレットとして設定
+az containerapp secret set `
+  --name "nginx" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --secrets `
+    "storage-key=$STORAGE_ACCOUNT_KEY"
 ```
 
 ## 10. SSRFプロキシコンテナアプリケーションのデプロイ
