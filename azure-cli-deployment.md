@@ -116,7 +116,7 @@ az network vnet subnet create `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --vnet-name "vnet-$LOCATION" `
   --name "ACASubnet" `
-  --address-prefix "${IP_PREFIX}.2.0/23"
+  --address-prefix "${IP_PREFIX}.2.0/23" `
   --delegations "Microsoft.App/environments"
 
 # PostgreSQL用サブネット作成
