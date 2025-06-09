@@ -755,13 +755,13 @@ az containerapp create `
   --image "ubuntu/squid:latest" `
   --ingress "internal" `
   --target-port 3128 `
-  --transport "tcp" `
+  --transport "auto" `
   --min-replicas "$ACA_APP_MIN_COUNT" `
   --max-replicas 10 `
   --cpu "0.5" `
   --memory "1Gi" `
   --command "/bin/bash -c" `
-  --arg "$SSRF_PROXY_COMMAND"
+  --arg "$SSRF_PROXY_COMMAND_ONE_LINE"
 
 # ストレージマウントを含むSSRFプロキシアプリケーションの更新
 # YAMLを使用してストレージマウントを設定
@@ -772,13 +772,13 @@ properties:
     ingress:
       external: false
       targetPort: 3128
-      transport: tcp
+      transport: auto
   template:
     volumes:
       - name: "ssrfproxyshare"
         storageName: "ssrfproxyshare"
         storageType: "AzureFile"
-        mountPath: "/etc/squid"
+        mountPath: "/custom-squid"
 '@ | Set-Content -Encoding String ssrfproxy-update.yaml
 
 # 2. YAMLファイルを使用してコンテナアプリを更新
