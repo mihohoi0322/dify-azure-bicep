@@ -384,7 +384,7 @@ if ($IS_ACA_ENABLED -eq $true) {
 }
 ```
 
-## 8. ACE環境の作成
+## 8. Container Apps環境の作成
 
 ```powershell
 # Log Analytics workspaceの作成
@@ -458,17 +458,17 @@ if ($IS_PROVIDED_CERT -eq $true) {
 
 ```powershell
 # nginx起動コマンドの定義
-$NGINX_COMMAND = @"
+$NGINX_COMMAND = @'
 mkdir -p /etc/nginx/conf.d /etc/nginx/modules && 
 for encoded_file in /custom-nginx/*.b64; do
-  if [ -f \"$encoded_file\" ]; then
-    dest_file=\"/etc/nginx/$(basename \"$encoded_file\" .b64)\"
-    echo \"デコード中: $(basename \"$encoded_file\") → $(basename \"$dest_file\")\"
-    base64 -d \"$encoded_file\" > \"$dest_file\"
+  if [ -f "$encoded_file" ]; then
+    dest_file="/etc/nginx/$(basename "$encoded_file" .b64)"
+    echo "デコード中: $(basename "$encoded_file") → $(basename "$dest_file")"
+    base64 -d "$encoded_file" > "$dest_file"
   fi
 done &&
 
-if [ ! -f \"/etc/nginx/fastcgi_params\" ]; then
+if [ ! -f "/etc/nginx/fastcgi_params" ]; then
   cat > /etc/nginx/fastcgi_params << EOF
 fastcgi_param  QUERY_STRING       \$query_string;
 fastcgi_param  REQUEST_METHOD     \$request_method;
@@ -492,7 +492,7 @@ fastcgi_param  REDIRECT_STATUS    200;
 EOF
 fi &&
 
-if [ ! -f \"/etc/nginx/scgi_params\" ]; then
+if [ ! -f "/etc/nginx/scgi_params" ]; then
   cat > /etc/nginx/scgi_params << EOF
 scgi_param  REQUEST_METHOD     \$request_method;
 scgi_param  REQUEST_URI        \$request_uri;
@@ -511,7 +511,7 @@ scgi_param  SERVER_NAME        \$server_name;
 EOF
 fi &&
 
-if [ ! -f \"/etc/nginx/uwsgi_params\" ]; then
+if [ ! -f "/etc/nginx/uwsgi_params" ]; then
   cat > /etc/nginx/uwsgi_params << EOF
 uwsgi_param  QUERY_STRING       \$query_string;
 uwsgi_param  REQUEST_METHOD     \$request_method;
@@ -532,30 +532,32 @@ fi &&
 
 # 通常の設定ファイルをコピー
 for conf_file in /custom-nginx/*.conf; do
-  if [ -f \"\$conf_file\" ]; then
-    cp \"\$conf_file\" /etc/nginx/
+  if [ -f "\$conf_file" ]; then
+    cp "\$conf_file" /etc/nginx/
   fi
 done &&
 
 for file in /custom-nginx/conf.d/*.conf; do
-  if [ -f \"\$file\" ]; then
-    cp \"\$file\" /etc/nginx/conf.d/
+  if [ -f "\$file" ]; then
+    cp "\$file" /etc/nginx/conf.d/
   fi
 done &&
 
 # mime.typesをコピー
-if [ -f \"/custom-nginx/mime.types\" ]; then
-  cp \"/custom-nginx/mime.types\" /etc/nginx/mime.types
+if [ -f "/custom-nginx/mime.types" ]; then
+  cp "/custom-nginx/mime.types" /etc/nginx/mime.types
 fi &&
 
 # modulesをコピー
-if [ -d \"/custom-nginx/modules\" ] && [ \"$(ls -A /custom-nginx/modules)\" ]; then
+if [ -d "/custom-nginx/modules" ] && [ "$(ls -A /custom-nginx/modules)" ]; then
   cp /custom-nginx/modules/* /etc/nginx/modules/ 2>/dev/null || true
 fi &&
 
-echo \"設定が完了しました。Nginxを起動します...\" &&
-nginx -g \"daemon off;\"
-"@
+echo "設定が完了しました。Nginxを起動します..." &&
+nginx -g "daemon off;"
+'@
+# Powershellで複数行コマンドは最初の1行目だけが認識されるため、コマンド全体を1行に変換
+$NGINX_COMMAND_ONE_LINE = '"' + ($NGINX_COMMAND -split "`r?`n") -join " " + '"'
 
 # nginxアプリケーションの作成
 az containerapp create `
@@ -571,7 +573,7 @@ az containerapp create `
   --cpu "0.5" `
   --memory "1Gi" `
   --command "/bin/bash -c" `
-  --arg $NGINX_COMMAND
+  --arg "$NGINX_COMMAND_ONE_LINE"
 
 # 1. 基本設定ファイルを作成（ストレージマウント設定を含む）
 @'
@@ -705,6 +707,9 @@ fi &&
 echo 'Starting squid...' &&
 squid -NYC"
 '@
+
+# Powershellで複数行コマンドは最初の1行目だけが認識されるため、コマンド全体を1行に変換
+$SSRF_PROXY_COMMAND_ONE_LINE = '"' + (($SSRF_PROXY_COMMAND -split "`r?`n") -join " ") + '"'
 
 # SSRFプロキシアプリケーションの作成
 az containerapp create `
@@ -918,7 +923,7 @@ properties:
       - name: pluginstorageshare
         storageName: pluginstorageshare
         storageType: AzureFile
-"@
+'@
 
 # YAML設定をファイルに出力
 $apiConfigYaml | Out-File -FilePath "api-update.yaml" -Encoding String
@@ -1017,7 +1022,7 @@ foreach ($AppName in $AppNames) {
 $DIFY_URL = az containerapp show --name "nginx" --resource-group "$RESOURCE_GROUP_NAME" --query "properties.configuration.ingress.fqdn" -o tsv
 Write-Output "==============================================="
 Write-Output "Difyアプリケーションは次のURLでアクセスできます："
-Write-Output "https://$DIFY_URL"
+Write-Output ("https://{0}" -f $DIFY_URL)
 Write-Output "==============================================="
 ```
 
