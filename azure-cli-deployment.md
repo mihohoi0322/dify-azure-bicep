@@ -786,6 +786,13 @@ az containerapp update `
   --name "ssrfproxy" `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --yaml ssrfproxy-update.yaml
+
+# 3. ストレージアカウントキーをシークレットとして設定
+az containerapp secret set `
+  --name "ssrfproxy" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --secrets `
+    "storage-key=$STORAGE_ACCOUNT_KEY"
 ```
 
 ## 11. Sandboxコンテナアプリケーションのデプロイ
@@ -837,6 +844,13 @@ az containerapp update `
   --name "sandbox" `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --yaml sandbox-update.yaml
+
+# 3. ストレージアカウントキーをシークレットとして設定
+az containerapp secret set `
+  --name "sandbox" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --secrets `
+    "storage-key=$STORAGE_ACCOUNT_KEY"
 ```
 
 ## 12. Workerコンテナアプリケーションのデプロイ
@@ -935,7 +949,7 @@ az containerapp create `
     "PLUGIN_REMOTE_INSTALLING_PORT=5003"
 
 # API用YAML設定ファイルの作成
-$apiConfigYaml = @"
+$apiConfigYaml = @'
 properties:
   configuration:
     ingress:
@@ -969,6 +983,13 @@ az containerapp update `
   --name "api" `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --yaml "api-update.yaml"
+
+# ストレージアカウントキーをシークレットとして設定
+az containerapp secret set `
+  --name "api" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --secrets `
+    "storage-key=$STORAGE_ACCOUNT_KEY"
 ```
 
 ## 14. Webコンテナアプリケーションのデプロイ
