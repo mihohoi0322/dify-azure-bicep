@@ -404,7 +404,9 @@ az containerapp env create `
   --logs-destination "log-analytics" `
   --logs-workspace-id "$LOG_ANALYTICS_WORKSPACE_CLIENT_ID" `
   --logs-workspace-key "$LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET" `
-  --infrastructure-subnet-resource-id "$ACA_SUBNET_ID"
+  --infrastructure-subnet-resource-id "$ACA_SUBNET_ID" `
+  --zone-redundant "false" `
+  --internal-only "false"
 
 # ストレージのマウント
 az containerapp env storage set `
