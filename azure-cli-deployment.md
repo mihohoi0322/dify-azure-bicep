@@ -1,4 +1,4 @@
-# Azure CLI による Dify のデプロイ手順（PowerShell版）
+﻿# Azure CLI による Dify のデプロイ手順（PowerShell版）
 
 このドキュメントでは、PowerShell環境でAzure CLI を使用して Dify アプリケーションをデプロイする手順を説明します。この手順は `deploy.sh` スクリプトが使用している Bicep テンプレートと同等の機能を提供します。
 
@@ -459,124 +459,6 @@ if ($IS_PROVIDED_CERT -eq $true) {
 ## 9. Nginxコンテナアプリケーションのデプロイ
 
 ```powershell
-# nginx起動コマンドの定義
-$NGINX_COMMAND = @'
-mkdir -p /etc/nginx/conf.d /etc/nginx/modules && 
-for encoded_file in /custom-nginx/*.b64; do
-  if [ -f "$encoded_file" ]; then
-    dest_file="/etc/nginx/$(basename "$encoded_file" .b64)"
-    echo "デコード中: $(basename "$encoded_file") → $(basename "$dest_file")"
-    base64 -d "$encoded_file" > "$dest_file"
-  fi
-done &&
-
-if [ ! -f "/etc/nginx/fastcgi_params" ]; then
-  cat > /etc/nginx/fastcgi_params << EOF
-fastcgi_param  QUERY_STRING       \$query_string;
-fastcgi_param  REQUEST_METHOD     \$request_method;
-fastcgi_param  CONTENT_TYPE       \$content_type;
-fastcgi_param  CONTENT_LENGTH     \$content_length;
-fastcgi_param  SCRIPT_NAME        \$fastcgi_script_name;
-fastcgi_param  REQUEST_URI        \$request_uri;
-fastcgi_param  DOCUMENT_URI       \$document_uri;
-fastcgi_param  DOCUMENT_ROOT      \$document_root;
-fastcgi_param  SERVER_PROTOCOL    \$server_protocol;
-fastcgi_param  REQUEST_SCHEME     \$scheme;
-fastcgi_param  HTTPS              \$https if_not_empty;
-fastcgi_param  GATEWAY_INTERFACE  CGI/1.1;
-fastcgi_param  SERVER_SOFTWARE    nginx/\$nginx_version;
-fastcgi_param  REMOTE_ADDR        \$remote_addr;
-fastcgi_param  REMOTE_PORT        \$remote_port;
-fastcgi_param  SERVER_ADDR        \$server_addr;
-fastcgi_param  SERVER_PORT        \$server_port;
-fastcgi_param  SERVER_NAME        \$server_name;
-fastcgi_param  REDIRECT_STATUS    200;
-EOF
-fi &&
-
-if [ ! -f "/etc/nginx/scgi_params" ]; then
-  cat > /etc/nginx/scgi_params << EOF
-scgi_param  REQUEST_METHOD     \$request_method;
-scgi_param  REQUEST_URI        \$request_uri;
-scgi_param  QUERY_STRING       \$query_string;
-scgi_param  CONTENT_TYPE       \$content_type;
-scgi_param  DOCUMENT_URI       \$document_uri;
-scgi_param  DOCUMENT_ROOT      \$document_root;
-scgi_param  SCGI               1;
-scgi_param  SERVER_PROTOCOL    \$server_protocol;
-scgi_param  REQUEST_SCHEME     \$scheme;
-scgi_param  HTTPS              \$https if_not_empty;
-scgi_param  REMOTE_ADDR        \$remote_addr;
-scgi_param  REMOTE_PORT        \$remote_port;
-scgi_param  SERVER_PORT        \$server_port;
-scgi_param  SERVER_NAME        \$server_name;
-EOF
-fi &&
-
-if [ ! -f "/etc/nginx/uwsgi_params" ]; then
-  cat > /etc/nginx/uwsgi_params << EOF
-uwsgi_param  QUERY_STRING       \$query_string;
-uwsgi_param  REQUEST_METHOD     \$request_method;
-uwsgi_param  CONTENT_TYPE       \$content_type;
-uwsgi_param  CONTENT_LENGTH     \$content_length;
-uwsgi_param  REQUEST_URI        \$request_uri;
-uwsgi_param  PATH_INFO          \$document_uri;
-uwsgi_param  DOCUMENT_ROOT      \$document_root;
-uwsgi_param  SERVER_PROTOCOL    \$server_protocol;
-uwsgi_param  REQUEST_SCHEME     \$scheme;
-uwsgi_param  HTTPS              \$https if_not_empty;
-uwsgi_param  REMOTE_ADDR        \$remote_addr;
-uwsgi_param  REMOTE_PORT        \$remote_port;
-uwsgi_param  SERVER_PORT        \$server_port;
-uwsgi_param  SERVER_NAME        \$server_name;
-EOF
-fi &&
-
-# 通常の設定ファイルをコピー
-for conf_file in /custom-nginx/*.conf; do
-  if [ -f "\$conf_file" ]; then
-    cp "\$conf_file" /etc/nginx/
-  fi
-done &&
-
-for file in /custom-nginx/conf.d/*.conf; do
-  if [ -f "\$file" ]; then
-    cp "\$file" /etc/nginx/conf.d/
-  fi
-done &&
-
-# mime.typesをコピー
-if [ -f "/custom-nginx/mime.types" ]; then
-  cp "/custom-nginx/mime.types" /etc/nginx/mime.types
-fi &&
-
-# modulesをコピー
-if [ -d "/custom-nginx/modules" ] && [ "$(ls -A /custom-nginx/modules)" ]; then
-  cp /custom-nginx/modules/* /etc/nginx/modules/ 2>/dev/null || true
-fi &&
-
-echo "設定が完了しました。Nginxを起動します..." &&
-nginx -g "daemon off;"
-'@
-# Powershellで複数行コマンドは最初の1行目だけが認識されるため、コマンド全体を1行に変換
-$NGINX_COMMAND_ONE_LINE = '"' + ($NGINX_COMMAND -split "`r?`n") -join " " + '"'
-
-# nginxアプリケーションの作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "nginx" `
-  --environment "$ACA_ENV_NAME" `
-  --image "nginx:latest" `
-  --ingress "external" `
-  --target-port 80 `
-  --transport "auto" `
-  --min-replicas "$ACA_APP_MIN_COUNT" `
-  --max-replicas 10 `
-  --cpu "0.5" `
-  --memory "1Gi" `
-  --command "/bin/bash -c" `
-  --arg "$NGINX_COMMAND_ONE_LINE"
-
 # 1. 基本設定ファイルを作成（ストレージマウント設定を含む）
 @'
 properties:
@@ -673,18 +555,18 @@ properties:
         storageType: AzureFile
 '@ | Set-Content -Encoding String nginx-config.yaml
 
-# 2. 基本設定ファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "nginx" `
+# 2. 基本設定ファイルを使用してコンテナアプリを作成
+az containerapp create `
   --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "nginx" `
+  --environment "$ACA_ENV_NAME" `
   --yaml nginx-config.yaml
 
 # 3. ストレージアカウントキーをシークレットとして設定
 az containerapp secret set `
   --name "nginx" `
   --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets `
-    "storage-key=$STORAGE_ACCOUNT_KEY"
+  --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
 ```
 
 ## 10. SSRFプロキシコンテナアプリケーションのデプロイ
