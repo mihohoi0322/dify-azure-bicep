@@ -1,4 +1,4 @@
-﻿# Azure CLI による Dify のデプロイ手順（PowerShell版）
+# Azure CLI による Dify のデプロイ手順（PowerShell版）
 
 このドキュメントでは、PowerShell環境でAzure CLI を使用して Dify アプリケーションをデプロイする手順を説明します。この手順は `deploy.sh` スクリプトが使用している Bicep テンプレートと同等の機能を提供します。
 
@@ -459,8 +459,22 @@ if ($IS_PROVIDED_CERT -eq $true) {
 ## 9. Nginxコンテナアプリケーションのデプロイ
 
 ```powershell
-# 1. 基本設定ファイルを作成（ストレージマウント設定を含む）
-@'
+# nginxアプリケーションの作成
+# 1. コンテナアプリを作成
+az containerapp create `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "nginx" `
+  --environment "$ACA_ENV_NAME" `
+  --image "nginx:latest"
+
+# 2. Nginxのストレージキーをシークレットとして設定
+az containerapp secret set `
+  --name "nginx" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
+
+# 3. ストレージマウントなどの設定を含むYAMLファイルを作成
+@"
 properties:
   configuration:
     ingress:
@@ -469,98 +483,36 @@ properties:
       transport: auto
     secrets:
       - name: "storage-key"
-        value: "<placeholder for $STORAGE_ACCOUNT_KEY>"
+        value: "to be replaced"
   template:
     containers:
       - name: nginx
         image: nginx:latest
         command:
-          - /bin/bash
+      - "/bin/bash"
         args:
-          - -c
-          - |
-            mkdir -p /etc/nginx/conf.d /etc/nginx/modules
-            
-            # Base64エンコードされたファイルをデコード
-            for encoded_file in /custom-nginx/*.b64; do
-              if [ -f "$encoded_file" ]; then
-                dest_file="/etc/nginx/$(basename "$encoded_file" .b64)"
-                echo "デコード中: $(basename "$encoded_file") → $(basename "$dest_file")"
-                base64 -d "$encoded_file" > "$dest_file"
-              fi
-            done
-            
-            # デフォルトのパラメータファイルを作成（存在しない場合）
-            if [ ! -f "/etc/nginx/fastcgi_params" ]; then
-              cat > /etc/nginx/fastcgi_params << 'INNER_EOF'
-            fastcgi_param  QUERY_STRING       $query_string;
-            fastcgi_param  REQUEST_METHOD     $request_method;
-            fastcgi_param  CONTENT_TYPE       $content_type;
-            fastcgi_param  CONTENT_LENGTH     $content_length;
-            fastcgi_param  SCRIPT_NAME        $fastcgi_script_name;
-            fastcgi_param  REQUEST_URI        $request_uri;
-            fastcgi_param  DOCUMENT_URI       $document_uri;
-            fastcgi_param  DOCUMENT_ROOT      $document_root;
-            fastcgi_param  SERVER_PROTOCOL    $server_protocol;
-            fastcgi_param  REQUEST_SCHEME     $scheme;
-            fastcgi_param  HTTPS              $https if_not_empty;
-            fastcgi_param  GATEWAY_INTERFACE  CGI/1.1;
-            fastcgi_param  SERVER_SOFTWARE    nginx/$nginx_version;
-            fastcgi_param  REMOTE_ADDR        $remote_addr;
-            fastcgi_param  REMOTE_PORT        $remote_port;
-            fastcgi_param  SERVER_ADDR        $server_addr;
-            fastcgi_param  SERVER_PORT        $server_port;
-            fastcgi_param  SERVER_NAME        $server_name;
-            fastcgi_param  REDIRECT_STATUS    200;
-            INNER_EOF
-            fi
-            
-            # 設定ファイルをコピー
-            for conf_file in /custom-nginx/*.conf; do
-              if [ -f "$conf_file" ]; then
-                cp "$conf_file" /etc/nginx/
-              fi
-            done
-            
-            for file in /custom-nginx/conf.d/*.conf; do
-              if [ -f "$file" ]; then
-                cp "$file" /etc/nginx/conf.d/
-              fi
-            done
-            
-            # mime.typesをコピー
-            if [ -f "/custom-nginx/mime.types" ]; then
-              cp "/custom-nginx/mime.types" /etc/nginx/mime.types
-            fi
-            
-            # modulesをコピー
-            if [ -d "/custom-nginx/modules" ] && [ "$(ls -A /custom-nginx/modules)" ]; then
-              cp /custom-nginx/modules/* /etc/nginx/modules/ 2>/dev/null || true
-            fi
-            
-            echo "設定が完了しました。Nginxを起動します..."
-            nginx -g "daemon off;"
-        volumeMounts:
-          - volumeName: nginxshare
-            mountPath: /custom-nginx
+      - "-c"
+      - "./custom-nginx/start.sh"
         resources:
           cpu: 0.5
           memory: 1Gi
+      volumeMounts:
+      - volumeName: nginxshare
+        mountPath: /custom-nginx
     scale:
-      minReplicas: 1
+      minReplicas: $ACA_APP_MIN_COUNT
       maxReplicas: 10
     volumes:
       - name: nginxshare
         storageName: nginxshare
         storageType: AzureFile
-'@ | Set-Content -Encoding String nginx-config.yaml
+"@ | Set-Content -Encoding String nginx-config.yaml
 
-# 2. 基本設定ファイルを使用してコンテナアプリを作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
+# 4. YAMLファイルを使用してストレージマウントを設定
+az containerapp update `
   --name "nginx" `
-  --environment "$ACA_ENV_NAME" `
-  --yaml nginx-config.yaml
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --yaml nginx-storage-config.yaml
 
 # 3. ストレージアカウントキーをシークレットとして設定
 az containerapp secret set `
@@ -572,85 +524,23 @@ az containerapp secret set `
 ## 10. SSRFプロキシコンテナアプリケーションのデプロイ
 
 ```powershell
-# SSRFプロキシの起動コマンド
-$SSRF_PROXY_COMMAND = @'
-            mkdir -p /etc/squid && mkdir -p /etc/squid/conf.d && 
-            if [ ! -f "/custom-squid/squid.conf" ]; then 
-              cat > /etc/squid/squid.conf << EOF
-acl localnet src 0.0.0.1-0.255.255.255	# RFC 1122 "this" network (LAN)
-acl localnet src 10.0.0.0/8		# RFC 1918 local private network (LAN)
-acl localnet src 100.64.0.0/10		# RFC 6598 shared address space (CGN)
-acl localnet src 169.254.0.0/16 	# RFC 3927 link-local (directly plugged) machines
-acl localnet src 172.16.0.0/12		# RFC 1918 local private network (LAN)
-acl localnet src 192.168.0.0/16		# RFC 1918 local private network (LAN)
-acl localnet src fc00::/7       	# RFC 4193 local private network range
-acl localnet src fe80::/10      	# RFC 4291 link-local (directly plugged) machines
-acl SSL_ports port 443
-acl Safe_ports port 80		# http
-acl Safe_ports port 21		# ftp
-acl Safe_ports port 443		# https
-acl Safe_ports port 70		# gopher
-acl Safe_ports port 210		# wais
-acl Safe_ports port 1025-65535	# unregistered ports
-acl Safe_ports port 280		# http-mgmt
-acl Safe_ports port 488		# gss-http
-acl Safe_ports port 591		# filemaker
-acl Safe_ports port 777		# multiling http
-acl CONNECT method CONNECT
-http_access deny !Safe_ports
-http_access deny CONNECT !SSL_ports
-http_access allow localhost manager
-http_access deny manager
-http_access allow localhost
-include /etc/squid/conf.d/*.conf
-http_access deny all
-################################## Proxy Server ################################
-http_port 3128
-coredump_dir /var/spool/squid
-refresh_pattern ^ftp:		1440	20%	10080
-refresh_pattern ^gopher:	1440	0%	1440
-refresh_pattern -i (/cgi-bin/|\?) 0	0%	0
-refresh_pattern \/(Packages|Sources)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
-refresh_pattern \/Release(|\.gpg)$ 0 0% 0 refresh-ims
-refresh_pattern \/InRelease$ 0 0% 0 refresh-ims
-refresh_pattern \/(Translation-.*)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
-refresh_pattern .		0	20%	4320
-################################## Reverse Proxy To Sandbox ################################
-http_port 8194 accel vhost
-cache_peer sandbox parent 8194 0 no-query originserver
-acl src_all src all
-http_access allow src_all
-EOF
-            else 
-              cp -rf /custom-squid/* /etc/squid/ 2>/dev/null
-            fi && 
-            touch /etc/squid/conf.d/placeholder.conf && 
-            squid -NYC
-'@
-
-# Powershellで複数行コマンドは最初の1行目だけが認識されるため、コマンド全体を1行に変換
-$SSRF_PROXY_COMMAND_ONE_LINE = '"' + (($SSRF_PROXY_COMMAND -split "`r?`n") -join " ") + '"'
-
 # SSRFプロキシアプリケーションの作成
+# 1. コンテナアプリを作成
 az containerapp create `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --name "ssrfproxy" `
   --environment "$ACA_ENV_NAME" `
-  --image "ubuntu/squid:latest" `
-  --ingress "internal" `
-  --target-port 3128 `
-  --transport "auto" `
-  --min-replicas "$ACA_APP_MIN_COUNT" `
-  --max-replicas 10 `
-  --cpu "0.5" `
-  --memory "1Gi" `
-  --command "/bin/bash -c" `
-  --arg "$SSRF_PROXY_COMMAND_ONE_LINE"
+  --image "ubuntu/squid:latest"
 
-# ストレージマウントを含むSSRFプロキシアプリケーションの更新
-# YAMLを使用してストレージマウントを設定
-# 1. YAML定義ファイルを作成
-@'
+# 2. ストレージアカウントキーをシークレットとして設定
+az containerapp secret set `
+  --name "ssrfproxy" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --secrets `
+    "storage-key=$STORAGE_ACCOUNT_KEY"
+
+# 3. YAMLファイルを使用してストレージマウントを設定
+@"
 properties:
   configuration:
     ingress:
@@ -658,14 +548,30 @@ properties:
       targetPort: 3128
       transport: auto
   template:
+    containers:
+    - name: ssrfproxy
+      image: ubuntu/squid:latest
+      command:
+      - "/bin/bash"
+      args:
+      - "-c"
+      - "./custom-squid/start.sh"
+      resources:
+        cpu: 0.5
+        memory: 1Gi
+      volumeMounts:
+      - volumeName: ssrfproxyshare
+        mountPath: /custom-squid
+    scale:
+      minReplicas: $ACA_APP_MIN_COUNT
+      maxReplicas: 10
     volumes:
       - name: "ssrfproxyshare"
         storageName: "ssrfproxyshare"
         storageType: "AzureFile"
-        mountPath: "/custom-squid"
-'@ | Set-Content -Encoding String ssrfproxy-update.yaml
+"@ | Set-Content -Encoding String ssrfproxy-storage-config.yaml
 
-# 2. YAMLファイルを使用してコンテナアプリを更新
+# 4. YAMLファイルを使用してコンテナアプリを更新
 az containerapp update `
   --name "ssrfproxy" `
   --resource-group "$RESOURCE_GROUP_NAME" `
