@@ -266,7 +266,182 @@ Create-FileShareIfNotExists -ShareName $SSRFPROXY_SHARE_NAME -ConnectionString $
 Create-FileShareIfNotExists -ShareName $PLUGIN_STORAGE_SHARE_NAME -ConnectionString $CONNECTION_STRING
 ```
 
-## 6. PostgreSQLフレキシブルサーバーの作成
+## 6. 設定ファイルのアップロード
+
+```powershell
+# 一時ディレクトリを作成
+$TEMP_DIR = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_.FullName }
+
+try {
+    # Nginxの設定ファイルをアップロード
+    Write-Output "Nginxの設定ファイルをアップロード中..."
+    
+    $nginxFiles = @("mountfiles/nginx/*.conf", "mountfiles/nginx/mime.types", "mountfiles/nginx/start.sh")
+    foreach ($pattern in $nginxFiles) {
+        $files = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
+        foreach ($file in $files) {
+            $filename = $file.Name
+            Write-Output "ファイルをアップロード: $filename"
+            
+            # 改行コードを修正（CRLF → LF）
+            $content = Get-Content -Path $file.FullName -Raw
+            $content = $content -replace "`r`n", "`n"
+            $tempFile = Join-Path $TEMP_DIR.FullName $filename
+
+            # BOMなしUTF-8で書き出す
+            $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($tempFile, $content, $utf8NoBomEncoding)
+            
+            # 修正したファイルをアップロード
+            az storage file upload --source "$tempFile" --share-name "$NGINX_SHARE_NAME" `
+              --path "$filename" --connection-string "$CONNECTION_STRING"
+        }
+    }
+    
+    # 特殊パラメータファイルをチェックして処理
+    $paramFiles = @("fastcgi_params", "scgi_params", "uwsgi_params")
+    foreach ($paramFile in $paramFiles) {
+        $fullPath = "mountfiles/nginx/$paramFile"
+        
+        if (Test-Path $fullPath) {
+            Write-Output "特殊ファイルをアップロード: $paramFile"
+            
+            # 改行コードを修正
+            $content = Get-Content -Path $fullPath -Raw
+            $content = $content -replace "`r`n", "`n"
+            $tempFile = Join-Path $TEMP_DIR.FullName $paramFile
+
+            # BOMなしUTF-8で書き出す
+            $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($tempFile, $content, $utf8NoBomEncoding)
+            
+            # base64エンコード
+            $bytes = [System.IO.File]::ReadAllBytes($tempFile)
+            $base64Content = [System.Convert]::ToBase64String($bytes)
+            $base64File = "$tempFile.b64"
+
+            # BOMなしUTF-8で書き出す
+            $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($base64File, $base64Content, $utf8NoBomEncoding)
+
+            # エンコードしたファイルをアップロード
+            az storage file upload --source "$base64File" --share-name "$NGINX_SHARE_NAME" `
+              --path "$paramFile.b64" --connection-string "$CONNECTION_STRING"
+        }
+    }
+    
+    # conf.dディレクトリのファイルをアップロード
+    Write-Output "conf.dディレクトリのファイルをアップロード中..."
+    if (Test-Path "mountfiles/nginx/conf.d") {
+        # conf.dディレクトリを作成
+        az storage directory create --name "conf.d" --share-name "$NGINX_SHARE_NAME" `
+          --connection-string "$CONNECTION_STRING"
+        
+        $confDFiles = Get-ChildItem -Path "mountfiles/nginx/conf.d/*" -File -ErrorAction SilentlyContinue
+        foreach ($file in $confDFiles) {
+            $filename = $file.Name
+            Write-Output "ファイルをアップロード: conf.d/$filename"
+            
+            # 改行コードを修正
+            $content = Get-Content -Path $file.FullName -Raw
+            $content = $content -replace "`r`n", "`n"
+            $tempFile = Join-Path $TEMP_DIR.FullName $filename
+
+            # BOMなしUTF-8で書き出す
+            $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($tempFile, $content, $utf8NoBomEncoding)
+            
+            az storage file upload --source "$tempFile" --share-name "$NGINX_SHARE_NAME" `
+              --path "conf.d/$filename" --connection-string "$CONNECTION_STRING"
+        }
+    }
+    
+    # modulesディレクトリのファイルをアップロード
+    Write-Output "modulesディレクトリのファイルをアップロード中..."
+    if (Test-Path "mountfiles/nginx/modules") {
+        # modulesディレクトリを作成
+        az storage directory create --name "modules" --share-name "$NGINX_SHARE_NAME" `
+          --connection-string "$CONNECTION_STRING"
+        
+        $moduleFiles = Get-ChildItem -Path "mountfiles/nginx/modules/*" -File -ErrorAction SilentlyContinue
+        foreach ($file in $moduleFiles) {
+            $filename = $file.Name
+            Write-Output "ファイルをアップロード: modules/$filename"
+            az storage file upload --source $file.FullName --share-name "$NGINX_SHARE_NAME" `
+              --path "modules/$filename" --connection-string "$CONNECTION_STRING"
+        }
+    }
+    
+    # SSRFプロキシの設定ファイルをアップロード
+    Write-Output "SSRFプロキシの設定ファイルをアップロード中..."
+    # conf.dディレクトリを作成
+    az storage directory create --name "conf.d" --share-name "$SSRFPROXY_SHARE_NAME" `
+      --connection-string "$CONNECTION_STRING"
+    
+    $ssrfProxyFiles = @("mountfiles/ssrfproxy/squid.conf", "mountfiles/ssrfproxy/errorpage.css", "mountfiles/ssrfproxy/start.sh")
+    foreach ($filePath in $ssrfProxyFiles) {
+        if (Test-Path $filePath) {
+            $filename = Split-Path $filePath -Leaf
+            Write-Output "ファイルをアップロード: $filename"
+            
+            # 改行コードを修正
+            $content = Get-Content -Path $filePath -Raw
+            $content = $content -replace "`r`n", "`n"
+            $tempFile = Join-Path $TEMP_DIR.FullName $filename
+
+            # BOMなしUTF-8で書き出す
+            $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($tempFile, $content, $utf8NoBomEncoding)
+            
+            az storage file upload --source "$tempFile" --share-name "$SSRFPROXY_SHARE_NAME" `
+              --path "$filename" --connection-string "$CONNECTION_STRING"
+        }
+    }
+    
+    # SSRFプロキシのconf.dディレクトリのファイルをアップロード
+    if (Test-Path "mountfiles/ssrfproxy/conf.d") {
+        $ssrfConfDFiles = Get-ChildItem -Path "mountfiles/ssrfproxy/conf.d/*" -File -ErrorAction SilentlyContinue
+        foreach ($file in $ssrfConfDFiles) {
+            $filename = $file.Name
+            Write-Output "ファイルをアップロード: conf.d/$filename"
+            
+            # 改行コードを修正
+            $content = Get-Content -Path $file.FullName -Raw
+            $content = $content -replace "`r`n", "`n"
+            $tempFile = Join-Path $TEMP_DIR.FullName $filename
+
+            # BOMなしUTF-8で書き出す
+            $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($tempFile, $content, $utf8NoBomEncoding)
+            
+            az storage file upload --source "$tempFile" --share-name "$SSRFPROXY_SHARE_NAME" `
+              --path "conf.d/$filename" --connection-string "$CONNECTION_STRING"
+        }
+    }
+    
+    # Sandbox用の設定ファイルをアップロード
+    Write-Output "Sandboxの設定ファイルをアップロード中..."
+    if (Test-Path "mountfiles/sandbox/python-requirements.txt") {
+        # 改行コードを修正
+        $content = Get-Content -Path "mountfiles/sandbox/python-requirements.txt" -Raw
+        $content = $content -replace "`r`n", "`n"
+        $tempFile = Join-Path $TEMP_DIR.FullName "python-requirements.txt"
+
+        # BOMなしUTF-8で書き出す
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($tempFile, $content, $utf8NoBomEncoding)
+        
+        az storage file upload --source "$tempFile" --share-name "$SANDBOX_SHARE_NAME" `
+          --path "python-requirements.txt" --connection-string "$CONNECTION_STRING"
+    }
+    
+} finally {
+    # 一時ディレクトリをクリーンアップ
+    Remove-Item -Path $TEMP_DIR.FullName -Recurse -Force -ErrorAction SilentlyContinue
+}
+```
+
+## 7. PostgreSQLフレキシブルサーバーの作成
 
 ```powershell
 # PostgreSQLサーバー名の設定
@@ -320,7 +495,7 @@ az postgres flexible-server db create `
 $POSTGRES_SERVER_FQDN = az postgres flexible-server show --resource-group "$RESOURCE_GROUP_NAME" --name "$PSQL_SERVER_NAME" --query "fullyQualifiedDomainName" -o tsv
 ```
 
-## 7. Redisキャッシュの作成
+## 8. Redisキャッシュの作成
 
 ```powershell
 # Redis関連変数の初期化
@@ -384,7 +559,7 @@ if ($IS_ACA_ENABLED -eq $true) {
 }
 ```
 
-## 8. Container Apps環境の作成
+## 9. Container Apps環境の作成
 
 ```powershell
 # Log Analytics workspaceの作成
@@ -456,10 +631,9 @@ if ($IS_PROVIDED_CERT -eq $true) {
 }
 ```
 
-## 9. Nginxコンテナアプリケーションのデプロイ
+## 10. Nginxコンテナアプリケーションのデプロイ
 
 ```powershell
-# nginxアプリケーションの作成
 # 1. コンテナアプリを作成
 az containerapp create `
   --resource-group "$RESOURCE_GROUP_NAME" `
@@ -467,64 +641,22 @@ az containerapp create `
   --environment "$ACA_ENV_NAME" `
   --image "nginx:latest"
 
-# 2. Nginxのストレージキーをシークレットとして設定
+# 2. ストレージキーをシークレットとして設定
 az containerapp secret set `
   --name "nginx" `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
 
-# 3. ストレージマウントなどの設定を含むYAMLファイルを作成
-@"
-properties:
-  configuration:
-    ingress:
-      external: true
-      targetPort: 80
-      transport: auto
-    secrets:
-      - name: "storage-key"
-        value: "to be replaced"
-  template:
-    containers:
-      - name: nginx
-        image: nginx:latest
-        command:
-      - "/bin/bash"
-        args:
-      - "-c"
-      - "./custom-nginx/start.sh"
-        resources:
-          cpu: 0.5
-          memory: 1Gi
-      volumeMounts:
-      - volumeName: nginxshare
-        mountPath: /custom-nginx
-    scale:
-      minReplicas: $ACA_APP_MIN_COUNT
-      maxReplicas: 10
-    volumes:
-      - name: nginxshare
-        storageName: nginxshare
-        storageType: AzureFile
-"@ | Set-Content -Encoding String nginx-config.yaml
-
-# 4. YAMLファイルを使用してストレージマウントを設定
+# 3. YAMLファイルを使用してコンテナアプリを更新
 az containerapp update `
   --name "nginx" `
   --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml nginx-storage-config.yaml
-
-# 3. ストレージアカウントキーをシークレットとして設定
-az containerapp secret set `
-  --name "nginx" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
+  --yaml nginx-config.yaml
 ```
 
-## 10. SSRFプロキシコンテナアプリケーションのデプロイ
+## 11. SSRFプロキシコンテナアプリケーションのデプロイ
 
 ```powershell
-# SSRFプロキシアプリケーションの作成
 # 1. コンテナアプリを作成
 az containerapp create `
   --resource-group "$RESOURCE_GROUP_NAME" `
@@ -539,111 +671,37 @@ az containerapp secret set `
   --secrets `
     "storage-key=$STORAGE_ACCOUNT_KEY"
 
-# 3. YAMLファイルを使用してストレージマウントを設定
-@"
-properties:
-  configuration:
-    ingress:
-      external: false
-      targetPort: 3128
-      transport: auto
-  template:
-    containers:
-    - name: ssrfproxy
-      image: ubuntu/squid:latest
-      command:
-      - "/bin/bash"
-      args:
-      - "-c"
-      - "./custom-squid/start.sh"
-      resources:
-        cpu: 0.5
-        memory: 1Gi
-      volumeMounts:
-      - volumeName: ssrfproxyshare
-        mountPath: /custom-squid
-    scale:
-      minReplicas: $ACA_APP_MIN_COUNT
-      maxReplicas: 10
-    volumes:
-      - name: "ssrfproxyshare"
-        storageName: "ssrfproxyshare"
-        storageType: "AzureFile"
-"@ | Set-Content -Encoding String ssrfproxy-storage-config.yaml
-
-# 4. YAMLファイルを使用してコンテナアプリを更新
+# 3. YAMLファイルを使用してコンテナアプリを更新
 az containerapp update `
   --name "ssrfproxy" `
   --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml ssrfproxy-update.yaml
-
-# 3. ストレージアカウントキーをシークレットとして設定
-az containerapp secret set `
-  --name "ssrfproxy" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets `
-    "storage-key=$STORAGE_ACCOUNT_KEY"
+  --yaml ssrfproxy-config.yaml
 ```
 
-## 11. Sandboxコンテナアプリケーションのデプロイ
+## 12. Sandboxコンテナアプリケーションのデプロイ
 
 ```powershell
-# Sandboxアプリケーションの作成
+# 1. Sandboxアプリケーションの作成
 az containerapp create `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --name "sandbox" `
   --environment "$ACA_ENV_NAME" `
   --image "$DIFY_SANDBOX_IMAGE" `
-  --ingress "internal" `
-  --target-port 8194 `
-  --transport "tcp" `
-  --min-replicas "$ACA_APP_MIN_COUNT" `
-  --max-replicas 10 `
-  --cpu "2" `
-  --memory "4Gi" `
-  --env-vars `
-    "LOG_LEVEL=INFO" `
-    "ENABLE_NETWORK=true" `
-    "HTTP_PROXY=http://ssrfproxy:3128" `
-    "HTTPS_PROXY=http://ssrfproxy:3128" `
-    "SANDBOX_PORT=8194" `
-  --scale-rule-name "sandbox" `
-  --scale-rule-type "tcp" `
-  --scale-rule-metadata "concurrentRequests=10"
 
-# ストレージマウントを含むSandboxアプリケーションの更新
-# YAMLを使用してストレージマウントを設定
-# 1. YAML定義ファイルを作成
-@'
-properties:
-  configuration:
-    ingress:
-      external: false
-      targetPort: 8194
-      transport: tcp
-  template:
-    volumes:
-      - name: "sandboxshare"
-        storageName: "sandboxshare"
-        storageType: "AzureFile"
-        mountPath: "/data"
-'@ | Set-Content -Encoding String sandbox-update.yaml
-
-# 2. YAMLファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "sandbox" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml sandbox-update.yaml
-
-# 3. ストレージアカウントキーをシークレットとして設定
+# 2. ストレージアカウントキーをシークレットとして設定
 az containerapp secret set `
   --name "sandbox" `
   --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets `
-    "storage-key=$STORAGE_ACCOUNT_KEY"
+  --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
+
+# 3. YAMLファイルを使用してコンテナアプリを更新
+az containerapp update `
+  --name "sandbox" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --yaml sandbox-config.yaml
 ```
 
-## 12. Workerコンテナアプリケーションのデプロイ
+## 13. Workerコンテナアプリケーションのデプロイ
 
 ```powershell
 # CeleryブローカーURLの設定
@@ -655,40 +713,33 @@ az containerapp create `
   --name "worker" `
   --environment "$ACA_ENV_NAME" `
   --image "$DIFY_API_IMAGE" `
-  --min-replicas "$ACA_APP_MIN_COUNT" `
-  --max-replicas 10 `
-  --cpu "2" `
-  --memory "4Gi" `
+
+# 3. YAMLファイルを使用してコンテナアプリを更新
+az containerapp update `
+  --name "worker" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --yaml worker-config.yaml
+
+# 4. Azureのリソース情報は環境変数として別途設定
+az containerapp env var set `
+  --name "worker" `
   --env-vars `
-    "MODE=worker" `
-    "LOG_LEVEL=INFO" `
-    "SECRET_KEY=sk-9f73s3ljTXVcMT3Blb3ljTqtsKiGHXVcMT3BlbkFJLK7U" `
     "DB_USERNAME=$PGSQL_USER" `
     "DB_PASSWORD=$PGSQL_PASSWORD" `
     "DB_HOST=$POSTGRES_SERVER_FQDN" `
-    "DB_PORT=5432" `
-    "DB_DATABASE=dify" `
     "REDIS_HOST=$REDIS_HOST_NAME" `
-    "REDIS_PORT=6380" `
     "REDIS_PASSWORD=$REDIS_PRIMARY_KEY" `
-    "REDIS_USE_SSL=true" `
-    "REDIS_DB=0" `
     "CELERY_BROKER_URL=$CELERY_BROKER_URL" `
-    "STORAGE_TYPE=azure-blob" `
     "AZURE_BLOB_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" `
     "AZURE_BLOB_ACCOUNT_KEY=$STORAGE_ACCOUNT_KEY" `
     "AZURE_BLOB_ACCOUNT_URL=$BLOB_ENDPOINT" `
     "AZURE_BLOB_CONTAINER_NAME=$STORAGE_ACCOUNT_CONTAINER" `
-    "VECTOR_STORE=pgvector" `
     "PGVECTOR_HOST=$POSTGRES_SERVER_FQDN" `
-    "PGVECTOR_PORT=5432" `
     "PGVECTOR_USER=$PGSQL_USER" `
-    "PGVECTOR_PASSWORD=$PGSQL_PASSWORD" `
-    "PGVECTOR_DATABASE=vector" `
-    "INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH=1000"
+    "PGVECTOR_PASSWORD=$PGSQL_PASSWORD"
 ```
 
-## 13. APIコンテナアプリケーションのデプロイ
+## 14. APIコンテナアプリケーションのデプロイ
 
 ```powershell
 # APIアプリケーションの作成
@@ -697,82 +748,6 @@ az containerapp create `
   --name "api" `
   --environment "$ACA_ENV_NAME" `
   --image "$DIFY_API_IMAGE" `
-  --ingress "internal" `
-  --target-port 5001 `
-  --exposed-port 5001 `
-  --transport "tcp" `
-  --min-replicas "$ACA_APP_MIN_COUNT" `
-  --max-replicas 10 `
-  --cpu "2" `
-  --memory "4Gi" `
-  --env-vars `
-    "MODE=api" `
-    "LOG_LEVEL=INFO" `
-    "API_SERVER_HOST=0.0.0.0" `
-    "API_SERVER_PORT=5001" `
-    "SECRET_KEY=sk-9f73s3ljTXVcMT3Blb3ljTqtsKiGHXVcMT3BlbkFJLK7U" `
-    "DB_USERNAME=$PGSQL_USER" `
-    "DB_PASSWORD=$PGSQL_PASSWORD" `
-    "DB_HOST=$POSTGRES_SERVER_FQDN" `
-    "DB_PORT=5432" `
-    "DB_DATABASE=dify" `
-    "REDIS_HOST=$REDIS_HOST_NAME" `
-    "REDIS_PORT=6380" `
-    "REDIS_PASSWORD=$REDIS_PRIMARY_KEY" `
-    "REDIS_USE_SSL=true" `
-    "REDIS_DB=0" `
-    "CELERY_BROKER_URL=$CELERY_BROKER_URL" `
-    "STORAGE_TYPE=azure-blob" `
-    "AZURE_BLOB_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" `
-    "AZURE_BLOB_ACCOUNT_KEY=$STORAGE_ACCOUNT_KEY" `
-    "AZURE_BLOB_ACCOUNT_URL=$BLOB_ENDPOINT" `
-    "AZURE_BLOB_CONTAINER_NAME=$STORAGE_ACCOUNT_CONTAINER" `
-    "VECTOR_STORE=pgvector" `
-    "PGVECTOR_HOST=$POSTGRES_SERVER_FQDN" `
-    "PGVECTOR_PORT=5432" `
-    "PGVECTOR_USER=$PGSQL_USER" `
-    "PGVECTOR_PASSWORD=$PGSQL_PASSWORD" `
-    "PGVECTOR_DATABASE=vector" `
-    "PLUGIN_WEBHOOK_ENABLED=true" `
-    "PLUGIN_REMOTE_INSTALLING_ENABLED=true" `
-    "PLUGIN_REMOTE_INSTALLING_HOST=127.0.0.1" `
-    "PLUGIN_REMOTE_INSTALLING_PORT=5003"
-
-# API用YAML設定ファイルの作成
-$apiConfigYaml = @'
-properties:
-  configuration:
-    ingress:
-      external: false
-      targetPort: 5001
-      transport: tcp
-  template:
-    containers:
-      - name: api
-        image: $DIFY_API_IMAGE
-        volumeMounts:
-          - volumeName: pluginstorageshare
-            mountPath: /app/plugins
-        resources:
-          cpu: 2
-          memory: 4Gi
-    scale:
-      minReplicas: $ACA_APP_MIN_COUNT
-      maxReplicas: 10
-    volumes:
-      - name: pluginstorageshare
-        storageName: pluginstorageshare
-        storageType: AzureFile
-'@
-
-# YAML設定をファイルに出力
-$apiConfigYaml | Out-File -FilePath "api-update.yaml" -Encoding String
-
-# YAMLファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "api" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml "api-update.yaml"
 
 # ストレージアカウントキーをシークレットとして設定
 az containerapp secret set `
@@ -780,9 +755,67 @@ az containerapp secret set `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --secrets `
     "storage-key=$STORAGE_ACCOUNT_KEY"
+
+# YAMLファイルを使用してコンテナアプリを更新
+az containerapp update `
+  --name "api" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --yaml "api-config.yaml"
+
+# Azureのリソース情報は環境変数として別途設定
+az containerapp env var set `
+  --name "api" `
+  --env-vars `
+    "DB_USERNAME=$PGSQL_USER" `
+    "DB_PASSWORD=$PGSQL_PASSWORD" `
+    "DB_HOST=$POSTGRES_SERVER_FQDN" `
+    "REDIS_HOST=$REDIS_HOST_NAME" `
+    "REDIS_PORT=6380" `
+    "REDIS_PASSWORD=$REDIS_PRIMARY_KEY" `
+    "CELERY_BROKER_URL=$CELERY_BROKER_URL" `
+    "AZURE_BLOB_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" `
+    "AZURE_BLOB_ACCOUNT_KEY=$STORAGE_ACCOUNT_KEY" `
+    "AZURE_BLOB_ACCOUNT_URL=$BLOB_ENDPOINT" `
+    "AZURE_BLOB_CONTAINER_NAME=$STORAGE_ACCOUNT_CONTAINER"
+    "PGVECTOR_HOST=$POSTGRES_SERVER_FQDN" `
+    "PGVECTOR_USER=$PGSQL_USER" `
+    "PGVECTOR_PASSWORD=$PGSQL_PASSWORD"
 ```
 
-## 14. Webコンテナアプリケーションのデプロイ
+## 15. Plugin Daemon コンテナアプリケーションのデプロイ
+
+```powershell
+# Plugin Daemon アプリケーションの作成
+az containerapp create `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "plugin" `
+  --environment "$ACA_ENV_NAME" `
+  --image "$DIFY_PLUGIN_DAEMON_IMAGE" `
+
+az containerapp env var set `
+  --name "plugin" `
+  --env-vars `
+    "DB_USERNAME=$PGSQL_USER" `
+    "DB_PASSWORD=$PGSQL_PASSWORD" `
+    "DB_HOST=$POSTGRES_SERVER_FQDN" `
+    "REDIS_HOST=$REDIS_HOST_NAME" `
+    "REDIS_PASSWORD=$REDIS_PRIMARY_KEY" `
+    "CELERY_BROKER_URL=$CELERY_BROKER_URL" `
+
+# ストレージアカウントキーをシークレットとして設定
+az containerapp secret set `
+  --name "plugin" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
+
+# YAMLファイルを使用してコンテナアプリを更新
+az containerapp update `
+  --name "plugin" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --yaml "plugin-config.yaml"
+```
+
+## 16. Webコンテナアプリケーションのデプロイ
 
 ```powershell
 # Webアプリケーションの作成
@@ -790,18 +823,12 @@ az containerapp create `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --name "web" `
   --environment "$ACA_ENV_NAME" `
-  --image "$DIFY_WEB_IMAGE" `
-  --ingress "internal" `
-  --target-port 3000 `
-  --transport "auto" `
-  --min-replicas "$ACA_APP_MIN_COUNT" `
-  --max-replicas 10 `
-  --cpu "1" `
-  --memory "2Gi" `
-  --env-vars `
-    "CONSOLE_API_URL=http://api:5001" `
-    "CONSOLE_API_PREFIX=/console/api" `
-    "SERVICE_API_PREFIX=/api"
+  --image "$DIFY_WEB_IMAGE" 
+
+az containerapp update `
+  --name "web" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --yaml "web-config.yaml"
 
 # カスタムドメインの設定（条件付き）
 if ($IS_PROVIDED_CERT -eq $true) {
@@ -819,7 +846,7 @@ if ($IS_PROVIDED_CERT -eq $true) {
 }
 ```
 
-## 15. デプロイ後の設定
+## 17. デプロイ後の設定
 
 ```powershell
 # ストレージアカウントの監査ログを有効化
@@ -840,7 +867,7 @@ try {
     
     # PostgreSQLサーバーのファイアウォールにクライアントIPを追加
     az postgres flexible-server firewall-rule create `
-      -- "ClientIPAccess" `
+      --rule-name "ClientIPAccess" `
       --resource-group "$RESOURCE_GROUP_NAME" `
       --name "$PSQL_SERVER_NAME" `
       --start-ip-address "$CLIENT_IP" `
@@ -873,161 +900,7 @@ Write-Output ("https://{0}" -f $DIFY_URL)
 Write-Output "==============================================="
 ```
 
-## 16. 設定ファイルのアップロード
-
-```powershell
-# 一時ディレクトリを作成
-$TEMP_DIR = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_.FullName }
-
-try {
-    # Nginxの設定ファイルをアップロード
-    Write-Output "Nginxの設定ファイルをアップロード中..."
-    
-    $nginxFiles = @("mountfiles/nginx/*.conf", "mountfiles/nginx/mime.types")
-    foreach ($pattern in $nginxFiles) {
-        $files = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
-        foreach ($file in $files) {
-            $filename = $file.Name
-            Write-Output "ファイルをアップロード: $filename"
-            
-            # 改行コードを修正（CRLF → LF）
-            $content = Get-Content -Path $file.FullName -Raw
-            $content = $content -replace "`r`n", "`n"
-            $tempFile = Join-Path $TEMP_DIR.FullName $filename
-            [System.IO.File]::WriteAllText($tempFile, $content, [System.Text.Encoding]::UTF8)
-            
-            # 修正したファイルをアップロード
-            az storage file upload --source "$tempFile" --share-name "$NGINX_SHARE_NAME" `
-              --path "$filename" --connection-string "$CONNECTION_STRING"
-        }
-    }
-    
-    # 特殊パラメータファイルをチェックして処理
-    $paramFiles = @("fastcgi_params", "scgi_params", "uwsgi_params")
-    foreach ($paramFile in $paramFiles) {
-        $fullPath = "mountfiles/nginx/$paramFile"
-        
-        if (Test-Path $fullPath) {
-            Write-Output "特殊ファイルをアップロード: $paramFile"
-            
-            # 改行コードを修正
-            $content = Get-Content -Path $fullPath -Raw
-            $content = $content -replace "`r`n", "`n"
-            $tempFile = Join-Path $TEMP_DIR.FullName $paramFile
-            [System.IO.File]::WriteAllText($tempFile, $content, [System.Text.Encoding]::UTF8)
-            
-            # base64エンコード
-            $bytes = [System.IO.File]::ReadAllBytes($tempFile)
-            $base64Content = [System.Convert]::ToBase64String($bytes)
-            $base64File = "$tempFile.b64"
-            [System.IO.File]::WriteAllText($base64File, $base64Content, [System.Text.Encoding]::UTF8)
-            
-            # エンコードしたファイルをアップロード
-            az storage file upload --source "$base64File" --share-name "$NGINX_SHARE_NAME" `
-              --path "$paramFile.b64" --connection-string "$CONNECTION_STRING"
-        }
-    }
-    
-    # conf.dディレクトリのファイルをアップロード
-    Write-Output "conf.dディレクトリのファイルをアップロード中..."
-    if (Test-Path "mountfiles/nginx/conf.d") {
-        # conf.dディレクトリを作成
-        az storage directory create --name "conf.d" --share-name "$NGINX_SHARE_NAME" `
-          --connection-string "$CONNECTION_STRING"
-        
-        $confDFiles = Get-ChildItem -Path "mountfiles/nginx/conf.d/*" -File -ErrorAction SilentlyContinue
-        foreach ($file in $confDFiles) {
-            $filename = $file.Name
-            Write-Output "ファイルをアップロード: conf.d/$filename"
-            
-            # 改行コードを修正
-            $content = Get-Content -Path $file.FullName -Raw
-            $content = $content -replace "`r`n", "`n"
-            $tempFile = Join-Path $TEMP_DIR.FullName $filename
-            [System.IO.File]::WriteAllText($tempFile, $content, [System.Text.Encoding]::UTF8)
-            
-            az storage file upload --source "$tempFile" --share-name "$NGINX_SHARE_NAME" `
-              --path "conf.d/$filename" --connection-string "$CONNECTION_STRING"
-        }
-    }
-    
-    # modulesディレクトリのファイルをアップロード
-    Write-Output "modulesディレクトリのファイルをアップロード中..."
-    if (Test-Path "mountfiles/nginx/modules") {
-        # modulesディレクトリを作成
-        az storage directory create --name "modules" --share-name "$NGINX_SHARE_NAME" `
-          --connection-string "$CONNECTION_STRING"
-        
-        $moduleFiles = Get-ChildItem -Path "mountfiles/nginx/modules/*" -File -ErrorAction SilentlyContinue
-        foreach ($file in $moduleFiles) {
-            $filename = $file.Name
-            Write-Output "ファイルをアップロード: modules/$filename"
-            az storage file upload --source $file.FullName --share-name "$NGINX_SHARE_NAME" `
-              --path "modules/$filename" --connection-string "$CONNECTION_STRING"
-        }
-    }
-    
-    # SSRFプロキシの設定ファイルをアップロード
-    Write-Output "SSRFプロキシの設定ファイルをアップロード中..."
-    # conf.dディレクトリを作成
-    az storage directory create --name "conf.d" --share-name "$SSRFPROXY_SHARE_NAME" `
-      --connection-string "$CONNECTION_STRING"
-    
-    $ssrfProxyFiles = @("mountfiles/ssrfproxy/squid.conf", "mountfiles/ssrfproxy/errorpage.css")
-    foreach ($filePath in $ssrfProxyFiles) {
-        if (Test-Path $filePath) {
-            $filename = Split-Path $filePath -Leaf
-            Write-Output "ファイルをアップロード: $filename"
-            
-            # 改行コードを修正
-            $content = Get-Content -Path $filePath -Raw
-            $content = $content -replace "`r`n", "`n"
-            $tempFile = Join-Path $TEMP_DIR.FullName $filename
-            [System.IO.File]::WriteAllText($tempFile, $content, [System.Text.Encoding]::UTF8)
-            
-            az storage file upload --source "$tempFile" --share-name "$SSRFPROXY_SHARE_NAME" `
-              --path "$filename" --connection-string "$CONNECTION_STRING"
-        }
-    }
-    
-    # SSRFプロキシのconf.dディレクトリのファイルをアップロード
-    if (Test-Path "mountfiles/ssrfproxy/conf.d") {
-        $ssrfConfDFiles = Get-ChildItem -Path "mountfiles/ssrfproxy/conf.d/*" -File -ErrorAction SilentlyContinue
-        foreach ($file in $ssrfConfDFiles) {
-            $filename = $file.Name
-            Write-Output "ファイルをアップロード: conf.d/$filename"
-            
-            # 改行コードを修正
-            $content = Get-Content -Path $file.FullName -Raw
-            $content = $content -replace "`r`n", "`n"
-            $tempFile = Join-Path $TEMP_DIR.FullName $filename
-            [System.IO.File]::WriteAllText($tempFile, $content, [System.Text.Encoding]::UTF8)
-            
-            az storage file upload --source "$tempFile" --share-name "$SSRFPROXY_SHARE_NAME" `
-              --path "conf.d/$filename" --connection-string "$CONNECTION_STRING"
-        }
-    }
-    
-    # Sandbox用の設定ファイルをアップロード
-    Write-Output "Sandboxの設定ファイルをアップロード中..."
-    if (Test-Path "mountfiles/sandbox/python-requirements.txt") {
-        # 改行コードを修正
-        $content = Get-Content -Path "mountfiles/sandbox/python-requirements.txt" -Raw
-        $content = $content -replace "`r`n", "`n"
-        $tempFile = Join-Path $TEMP_DIR.FullName "python-requirements.txt"
-        [System.IO.File]::WriteAllText($tempFile, $content, [System.Text.Encoding]::UTF8)
-        
-        az storage file upload --source "$tempFile" --share-name "$SANDBOX_SHARE_NAME" `
-          --path "python-requirements.txt" --connection-string "$CONNECTION_STRING"
-    }
-    
-} finally {
-    # 一時ディレクトリをクリーンアップ
-    Remove-Item -Path $TEMP_DIR.FullName -Recurse -Force -ErrorAction SilentlyContinue
-}
-```
-
-## 17. データベース拡張機能のセットアップ（PostgreSQL psqlツールが必要）
+## 18. データベース拡張機能のセットアップ（PostgreSQL psqlツールが必要）
 
 ```powershell
 # PostgreSQLクライアントツールが必要です

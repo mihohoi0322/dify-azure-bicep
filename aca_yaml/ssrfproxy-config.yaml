@@ -1,0 +1,28 @@
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 3128
+      transport: auto
+  template:
+    containers:
+    - name: ssrfproxy
+      image: ubuntu/squid:latest
+      command:
+      - "/bin/bash"
+      args:
+      - "-c"
+      - "./custom-squid/start.sh"
+      resources:
+        cpu: 0.5
+        memory: 1Gi
+      volumeMounts:
+      - volumeName: ssrfproxyshare
+        mountPath: /custom-squid
+    scale:
+      minReplicas: $ACA_APP_MIN_COUNT
+      maxReplicas: 10
+    volumes:
+      - name: "ssrfproxyshare"
+        storageName: "ssrfproxyshare"
+        storageType: "AzureFile"
