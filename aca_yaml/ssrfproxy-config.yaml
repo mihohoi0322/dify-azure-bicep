@@ -20,7 +20,7 @@ properties:
       - volumeName: ssrfproxyshare
         mountPath: /custom-squid
     scale:
-      minReplicas: $ACA_APP_MIN_COUNT
+      minReplicas: 1
       maxReplicas: 10
     volumes:
       - name: "ssrfproxyshare"

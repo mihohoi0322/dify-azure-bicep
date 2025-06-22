@@ -151,6 +151,19 @@ az storage account create `
   --enable-large-file-share `
   --enable-hierarchical-namespace false
 
+# クライアントIPを取得してファイアウォールに追加
+try {
+    $CLIENT_IP = (Invoke-RestMethod -Uri "https://api.ipify.org?format=json").ip
+    Write-Output "現在のIPアドレス: $CLIENT_IP をストレージアカウントのファイアウォールに追加します"
+    
+    az storage account network-rule add `
+      --account-name "$STORAGE_ACCOUNT_NAME" `
+      --resource-group "$RESOURCE_GROUP_NAME" `
+      --ip-address "$CLIENT_IP"
+} catch {
+    Write-Warning "クライアントIPの取得に失敗しました: $($_.Exception.Message)"
+}
+
 # ストレージアカウントのマネージドIDを使用するための準備
 # 注意：セキュリティベストプラクティスとして、アカウントキーの代わりにマネージドIDを使用することを推奨
 $STORAGE_ACCOUNT_KEY = az storage account keys list --resource-group "$RESOURCE_GROUP_NAME" --account-name "$STORAGE_ACCOUNT_NAME" --query "[0].value" -o tsv
@@ -314,7 +327,7 @@ try {
             # BOMなしUTF-8で書き出す
             $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
             [System.IO.File]::WriteAllText($tempFile, $content, $utf8NoBomEncoding)
-            
+
             # base64エンコード
             $bytes = [System.IO.File]::ReadAllBytes($tempFile)
             $base64Content = [System.Convert]::ToBase64String($bytes)
@@ -562,291 +575,47 @@ if ($IS_ACA_ENABLED -eq $true) {
 ## 9. Container Apps環境の作成
 
 ```powershell
-# Log Analytics workspaceの作成
-az monitor log-analytics workspace create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --workspace-name "$ACA_LOGA_NAME" `
-  --location "$LOCATION"
+# 1. parameter.jsonをparameters.only-aca.jsonという名前でコピー
+Copy-Item -Path "parameters.json" -Destination "parameters-only-aca.json"
 
-$LOG_ANALYTICS_WORKSPACE_CLIENT_ID = az monitor log-analytics workspace show --resource-group "$RESOURCE_GROUP_NAME" --workspace-name "$ACA_LOGA_NAME" --query "customerId" -o tsv
-$LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET = az monitor log-analytics workspace get-shared-keys --resource-group "$RESOURCE_GROUP_NAME" --workspace-name "$ACA_LOGA_NAME" --query "primarySharedKey" -o tsv
-
-# Container Apps環境の作成
-az containerapp env create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "$ACA_ENV_NAME" `
-  --location "$LOCATION" `
-  --logs-destination "log-analytics" `
-  --logs-workspace-id "$LOG_ANALYTICS_WORKSPACE_CLIENT_ID" `
-  --logs-workspace-key "$LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET" `
-  --infrastructure-subnet-resource-id "$ACA_SUBNET_ID" `
-  --zone-redundant "false" `
-  --internal-only "false"
-
-# ストレージのマウント
-az containerapp env storage set `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "$ACA_ENV_NAME" `
-  --storage-name "nginxshare" `
-  --azure-file-account-name "$STORAGE_ACCOUNT_NAME" `
-  --azure-file-account-key "$STORAGE_ACCOUNT_KEY" `
-  --azure-file-share-name "$NGINX_SHARE_NAME" `
-  --access-mode "ReadWrite"
-
-az containerapp env storage set `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "$ACA_ENV_NAME" `
-  --storage-name "ssrfproxyshare" `
-  --azure-file-account-name "$STORAGE_ACCOUNT_NAME" `
-  --azure-file-account-key "$STORAGE_ACCOUNT_KEY" `
-  --azure-file-share-name "$SSRFPROXY_SHARE_NAME" `
-  --access-mode "ReadWrite"
-
-az containerapp env storage set `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "$ACA_ENV_NAME" `
-  --storage-name "sandboxshare" `
-  --azure-file-account-name "$STORAGE_ACCOUNT_NAME" `
-  --azure-file-account-key "$STORAGE_ACCOUNT_KEY" `
-  --azure-file-share-name "$SANDBOX_SHARE_NAME" `
-  --access-mode "ReadWrite"
-
-az containerapp env storage set `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "$ACA_ENV_NAME" `
-  --storage-name "pluginstorageshare" `
-  --azure-file-account-name "$STORAGE_ACCOUNT_NAME" `
-  --azure-file-account-key "$STORAGE_ACCOUNT_KEY" `
-  --azure-file-share-name "$PLUGIN_STORAGE_SHARE_NAME" `
-  --access-mode "ReadWrite"
-
-# 証明書の追加（条件付き）
-if ($IS_PROVIDED_CERT -eq $true) {
-  az containerapp env certificate set `
-    --resource-group "$RESOURCE_GROUP_NAME" `
-    --environment "$ACA_ENV_NAME" `
-    --name "difycerts" `
-    --password "$ACA_CERT_PASSWORD" `
-    --value "$ACA_CERT_BASE64_VALUE"
+# 2. parameters.only-aca.jsonに対して $ACA_SUBNET_ID の値を acaSubnetId というキー名としてJSONに追記
+# 変数名とparameters.jsonのキー名の対応表
+$paramMap = @{
+    "ACA_SUBNET_ID"        = "acaSubnetId"
+    "STORAGE_ACCOUNT_KEY"  = "storageAccountKey"
+    "STORAGE_ACCOUNT_NAME" = "storageAccountName"
+    "NGINX_SHARE_NAME"    = "nginxShareName"
+    "SANDBOX_SHARE_NAME"  = "sandboxShareName"
+    "SSRFPROXY_SHARE_NAME" = "ssrfproxyShareName"
+    "PLUGIN_STORAGE_SHARE_NAME" = "pluginStorageShareName"
+    "POSTGRES_SERVER_FQDN" = "postgresServerFqdn"
+    "REDIS_HOST_NAME" = "redisHostName"
+    "REDIS_PRIMARY_KEY" = "redisPrimaryKey"
+    "BLOB_ENDPOINT" = "blobEndpoint"
 }
-```
 
-## 10. Nginxコンテナアプリケーションのデプロイ
+$paramFile = "parameters-only-aca.json"
+$params = Get-Content $paramFile | ConvertFrom-Json
 
-```powershell
-# 1. コンテナアプリを作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "nginx" `
-  --environment "$ACA_ENV_NAME" `
-  --image "nginx:latest"
-
-# 2. ストレージキーをシークレットとして設定
-az containerapp secret set `
-  --name "nginx" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
-
-# 3. YAMLファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "nginx" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml nginx-config.yaml
-```
-
-## 11. SSRFプロキシコンテナアプリケーションのデプロイ
-
-```powershell
-# 1. コンテナアプリを作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "ssrfproxy" `
-  --environment "$ACA_ENV_NAME" `
-  --image "ubuntu/squid:latest"
-
-# 2. ストレージアカウントキーをシークレットとして設定
-az containerapp secret set `
-  --name "ssrfproxy" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets `
-    "storage-key=$STORAGE_ACCOUNT_KEY"
-
-# 3. YAMLファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "ssrfproxy" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml ssrfproxy-config.yaml
-```
-
-## 12. Sandboxコンテナアプリケーションのデプロイ
-
-```powershell
-# 1. Sandboxアプリケーションの作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "sandbox" `
-  --environment "$ACA_ENV_NAME" `
-  --image "$DIFY_SANDBOX_IMAGE" `
-
-# 2. ストレージアカウントキーをシークレットとして設定
-az containerapp secret set `
-  --name "sandbox" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
-
-# 3. YAMLファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "sandbox" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml sandbox-config.yaml
-```
-
-## 13. Workerコンテナアプリケーションのデプロイ
-
-```powershell
-# CeleryブローカーURLの設定
-$CELERY_BROKER_URL = if ($REDIS_HOST_NAME) { "rediss://:$REDIS_PRIMARY_KEY@${REDIS_HOST_NAME}:6380/1" } else { "" }
-
-# Workerアプリケーションの作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "worker" `
-  --environment "$ACA_ENV_NAME" `
-  --image "$DIFY_API_IMAGE" `
-
-# 3. YAMLファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "worker" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml worker-config.yaml
-
-# 4. Azureのリソース情報は環境変数として別途設定
-az containerapp env var set `
-  --name "worker" `
-  --env-vars `
-    "DB_USERNAME=$PGSQL_USER" `
-    "DB_PASSWORD=$PGSQL_PASSWORD" `
-    "DB_HOST=$POSTGRES_SERVER_FQDN" `
-    "REDIS_HOST=$REDIS_HOST_NAME" `
-    "REDIS_PASSWORD=$REDIS_PRIMARY_KEY" `
-    "CELERY_BROKER_URL=$CELERY_BROKER_URL" `
-    "AZURE_BLOB_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" `
-    "AZURE_BLOB_ACCOUNT_KEY=$STORAGE_ACCOUNT_KEY" `
-    "AZURE_BLOB_ACCOUNT_URL=$BLOB_ENDPOINT" `
-    "AZURE_BLOB_CONTAINER_NAME=$STORAGE_ACCOUNT_CONTAINER" `
-    "PGVECTOR_HOST=$POSTGRES_SERVER_FQDN" `
-    "PGVECTOR_USER=$PGSQL_USER" `
-    "PGVECTOR_PASSWORD=$PGSQL_PASSWORD"
-```
-
-## 14. APIコンテナアプリケーションのデプロイ
-
-```powershell
-# APIアプリケーションの作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "api" `
-  --environment "$ACA_ENV_NAME" `
-  --image "$DIFY_API_IMAGE" `
-
-# ストレージアカウントキーをシークレットとして設定
-az containerapp secret set `
-  --name "api" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets `
-    "storage-key=$STORAGE_ACCOUNT_KEY"
-
-# YAMLファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "api" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml "api-config.yaml"
-
-# Azureのリソース情報は環境変数として別途設定
-az containerapp env var set `
-  --name "api" `
-  --env-vars `
-    "DB_USERNAME=$PGSQL_USER" `
-    "DB_PASSWORD=$PGSQL_PASSWORD" `
-    "DB_HOST=$POSTGRES_SERVER_FQDN" `
-    "REDIS_HOST=$REDIS_HOST_NAME" `
-    "REDIS_PORT=6380" `
-    "REDIS_PASSWORD=$REDIS_PRIMARY_KEY" `
-    "CELERY_BROKER_URL=$CELERY_BROKER_URL" `
-    "AZURE_BLOB_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME" `
-    "AZURE_BLOB_ACCOUNT_KEY=$STORAGE_ACCOUNT_KEY" `
-    "AZURE_BLOB_ACCOUNT_URL=$BLOB_ENDPOINT" `
-    "AZURE_BLOB_CONTAINER_NAME=$STORAGE_ACCOUNT_CONTAINER"
-    "PGVECTOR_HOST=$POSTGRES_SERVER_FQDN" `
-    "PGVECTOR_USER=$PGSQL_USER" `
-    "PGVECTOR_PASSWORD=$PGSQL_PASSWORD"
-```
-
-## 15. Plugin Daemon コンテナアプリケーションのデプロイ
-
-```powershell
-# Plugin Daemon アプリケーションの作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "plugin" `
-  --environment "$ACA_ENV_NAME" `
-  --image "$DIFY_PLUGIN_DAEMON_IMAGE" `
-
-az containerapp env var set `
-  --name "plugin" `
-  --env-vars `
-    "DB_USERNAME=$PGSQL_USER" `
-    "DB_PASSWORD=$PGSQL_PASSWORD" `
-    "DB_HOST=$POSTGRES_SERVER_FQDN" `
-    "REDIS_HOST=$REDIS_HOST_NAME" `
-    "REDIS_PASSWORD=$REDIS_PRIMARY_KEY" `
-    "CELERY_BROKER_URL=$CELERY_BROKER_URL" `
-
-# ストレージアカウントキーをシークレットとして設定
-az containerapp secret set `
-  --name "plugin" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --secrets "storage-key=$STORAGE_ACCOUNT_KEY"
-
-# YAMLファイルを使用してコンテナアプリを更新
-az containerapp update `
-  --name "plugin" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml "plugin-config.yaml"
-```
-
-## 16. Webコンテナアプリケーションのデプロイ
-
-```powershell
-# Webアプリケーションの作成
-az containerapp create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "web" `
-  --environment "$ACA_ENV_NAME" `
-  --image "$DIFY_WEB_IMAGE" 
-
-az containerapp update `
-  --name "web" `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --yaml "web-config.yaml"
-
-# カスタムドメインの設定（条件付き）
-if ($IS_PROVIDED_CERT -eq $true) {
-    az containerapp hostname add `
-      --resource-group "$RESOURCE_GROUP_NAME" `
-      --name "nginx" `
-      --hostname "$ACA_DIFY_CUSTOMER_DOMAIN"
-    
-    az containerapp hostname bind `
-      --resource-group "$RESOURCE_GROUP_NAME" `
-      --name "nginx" `
-      --hostname "$ACA_DIFY_CUSTOMER_DOMAIN" `
-      --environment "$ACA_ENV_NAME" `
-      --certificate "difycerts"
+foreach ($varName in $paramMap.Keys) {
+    $paramName = $paramMap[$varName]
+    $value = Get-Variable -Name $varName -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $value) {
+        $params.parameters | Add-Member -MemberType NoteProperty -Name $paramName -Value @{ "value" = $value } -Force
+    }
 }
+
+$params | ConvertTo-Json -Depth 10 | Set-Content $paramFile -Encoding UTF8
+
+# bicepを使用してContainer Apps環境、および関連リソースをデプロイ
+$DEPLOYMENT_NAME = "dify-deployment-$(Get-Date -Format 'yyyyMMddHHmmss')"
+az deployment sub create --name $DEPLOYMENT_NAME --location $LOCATION --template-file main-only-aca.bicep --parameters parameters-only-aca.json
+
+# デプロイ完了後、parameters.only-aca.jsonを削除
+Remove-Item -Path $paramFile -Force
 ```
 
-## 17. デプロイ後の設定
+## 10. デプロイ後の設定と動作確認
 
 ```powershell
 # ストレージアカウントの監査ログを有効化
@@ -854,27 +623,6 @@ az storage account update `
   --name "$STORAGE_ACCOUNT_NAME" `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --enable-local-user true
-
-# クライアントIPを取得してファイアウォールに追加
-try {
-    $CLIENT_IP = (Invoke-RestMethod -Uri "https://api.ipify.org?format=json").ip
-    Write-Output "現在のIPアドレス: $CLIENT_IP をストレージアカウントのファイアウォールに追加します"
-    
-    az storage account network-rule add `
-      --account-name "$STORAGE_ACCOUNT_NAME" `
-      --resource-group "$RESOURCE_GROUP_NAME" `
-      --ip-address "$CLIENT_IP"
-    
-    # PostgreSQLサーバーのファイアウォールにクライアントIPを追加
-    az postgres flexible-server firewall-rule create `
-      --rule-name "ClientIPAccess" `
-      --resource-group "$RESOURCE_GROUP_NAME" `
-      --name "$PSQL_SERVER_NAME" `
-      --start-ip-address "$CLIENT_IP" `
-      --end-ip-address "$CLIENT_IP"
-} catch {
-    Write-Warning "クライアントIPの取得に失敗しました: $($_.Exception.Message)"
-}
 
 # PostgreSQLサーバーのパラメータを設定
 az postgres flexible-server parameter set `
@@ -900,20 +648,154 @@ Write-Output ("https://{0}" -f $DIFY_URL)
 Write-Output "==============================================="
 ```
 
-## 18. データベース拡張機能のセットアップ（PostgreSQL psqlツールが必要）
+## 11. 各種サービスの閉域化
 
 ```powershell
-# PostgreSQLクライアントツールが必要です
-# 環境変数を設定してpsqlコマンドを実行
-$env:PGPASSWORD = $PGSQL_PASSWORD
+# ストレージアカウントへのパブリックアクセスを無効化
+az storage account update `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "$STORAGE_ACCOUNT_NAME" `
+  --public-network-access "Disabled"
 
-# PostgreSQLデータベースのベクター拡張機能を有効化
-psql -h "$POSTGRES_SERVER_FQDN" -U "$PGSQL_USER" -d "vector" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+# PostgreSQLサーバーへのパブリックアクセスは既定で無効化済み
 
-# uuid-ossp拡張機能の有効化
-psql -h "$POSTGRES_SERVER_FQDN" -U "$PGSQL_USER" -d "dify" -c "CREATE EXTENSION IF NOT EXISTS `"uuid-ossp`";"
-psql -h "$POSTGRES_SERVER_FQDN" -U "$PGSQL_USER" -d "vector" -c "CREATE EXTENSION IF NOT EXISTS `"uuid-ossp`";"
+# Container Apps拡張機能のインストール
+az extension add --name containerapp --upgrade --allow-preview true
 
+# Container Apps環境へのパブリックネットワークアクセスを無効化
+az containerapp env update `
+  --name "$ACA_ENV_NAME" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --public-network-access "Disabled" `
+  --internal-only true
+
+# プライベートエンドポイントを構成する
+# （Container Apps環境へのパブリックアクセスが無効化された後でのみ、プライベートエンドポイントを作成可能）
+$ACA_ENV_PE_NAME = "pe-aca-env"
+az network private-endpoint create `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "$ACA_ENV_PE_NAME" `
+  --location "$LOCATION" `
+  --subnet "$PRIVATE_LINK_SUBNET_ID" `
+  --private-connection-resource-id $(az containerapp env show --resource-group "$RESOURCE_GROUP_NAME" --name "$ACA_ENV_NAME" --query "id" -o tsv) `
+  --group-id managedEnvironments `
+  --connection-name "psc-aca-env"
+
+# ACA Managed Environment 用プライベートDNSゾーンの作成
+$ACA_ENV_DNS_ZONE = "privatelink.${LOCATION}.azurecontainerapps.io"
+az network private-dns zone create `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "$ACA_ENV_DNS_ZONE"
+
+# プライベートDNSゾーンと仮想ネットワークのリンク
+az network private-dns link vnet create `
+  --resource-group $RESOURCE_GROUP_NAME `
+  --zone-name $ACA_ENV_DNS_ZONE `
+  --name "aca-env-dns-link" `
+  --virtual-network $VNET_ID `
+  --registration-enabled false
+
+# プライベートDNSゾーングループの作成
+az network private-endpoint dns-zone-group create `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --endpoint-name "$ACA_ENV_PE_NAME" `
+  --name "pdz-aca-env" `
+  --private-dns-zone "$ACA_ENV_DNS_ZONE" `
+  --zone-name "config1"
+
+# DNSレコード名の取得
+$ENVIRONMENT_ID = (az containerapp env show `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "$ACA_ENV_NAME" `
+  --query "id" `
+  -o tsv
+)
+
+$DNS_RECORD_NAME = (
+  (az containerapp env show `
+    --id $ENVIRONMENT_ID `
+    --query 'properties.defaultDomain' `
+    --output tsv
+  ) -replace '\..*',''
+)
+
+# プライベートDNSゾーンにAレコードを追加
+$PRIVATE_ENDPOINT_IP_ADDRESS = (az network private-endpoint show `
+  --name $ACA_ENV_PE_NAME `
+  --resource-group $RESOURCE_GROUP_NAME `
+  --query 'customDnsConfigs[0].ipAddresses[0]' `
+  --output tsv
+)
+
+az network private-dns record-set a add-record `
+  --resource-group $RESOURCE_GROUP_NAME `
+  --zone-name "privatelink.japaneast.azurecontainerapps.io" `
+  --record-set-name $DNS_RECORD_NAME `
+  --ipv4-address $PRIVATE_ENDPOINT_IP_ADDRESS
+
+# Azure Monitor プライベートリンクスコープの作成
+$AMPLS_NAME = "monitor-pls"
+az monitor private-link-scope create `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "$AMPLS_NAME"
+
+# リソースアクセスをプライベートのみへ変更
+# TODO: このコマンドを修正する必要あり
+$properties = @'
+{\"accessModeSettings\": {\"queryAccessMode\":\"PrivateOnly\",\"ingestionAccessMode\":\"PrivateOnly\"}}
+'@
+az monitor private-link-scope update `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --name "$AMPLS_NAME" `
+  --add $properties
+
+# Log Analytics WorkspaceのIDを取得
+$LOG_ANALYTICS_WS_ID = az monitor log-analytics workspace show `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --workspace-name "$ACA_LOGA_NAME" `
+  --query "id" -o tsv
+
+# Log Analytics Workspaceをプライベートリンクスコープに関連付け
+az monitor private-link-scope scoped-resource create `
+  -g "$RESOURCE_GROUP_NAME" --scope-name "$AMPLS_NAME" `
+  -n "${ACA_LOGA_NAME}-connection" `
+  --linked-resource "$LOG_ANALYTICS_WS_ID"
+
+$SCOPE_ID = az monitor private-link-scope show -g "$RESOURCE_GROUP_NAME" -n "$AMPLS_NAME" --query id -o tsv
+
+# AMPLSのプライベートエンドポイントを作成
+$AMPLS_PE_NAME = "pe-ampls"
+az network private-endpoint create  `
+  -g "$RESOURCE_GROUP_NAME" -n "$AMPLS_PE_NAME" `
+  --vnet-name "vnet-$LOCATION" --subnet "$PRIVATE_LINK_SUBNET_ID" `
+  --private-connection-resource-id "$SCOPE_ID" `
+  --group-id azuremonitor `
+  --connection-name "$AMPLS_PE_NAME-conn"
+
+az network private-endpoint dns-zone-group create `
+  -g "$RESOURCE_GROUP_NAME" `
+  --endpoint-name "$AMPLS_PE_NAME" `
+  -n "ampls-zonegrp" `
+  --zone-name "config1" `
+  --private-dns-zone "privatelink.monitor.azure.com" `
+  --private-dns-zone "privatelink.ods.opinsights.azure.com" `
+  --private-dns-zone "privatelink.oms.opinsights.azure.com" `
+  --private-dns-zone "privatelink.agentsvc.azure-automation.net" `
+  --private-dns-zone "privatelink.blob.core.windows.net"
+
+# AMPLSにPrivate Endpointを関連付け（接続の承認）
+$PE_CONNECTION_NAME = (az monitor private-link-scope private-endpoint-connection list `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --scope-name "$AMPLS_NAME" `
+  --query "[0].name" -o tsv)
+
+az monitor private-link-scope private-endpoint-connection approve `
+  --name "$PE_CONNECTION_NAME" `
+  --resource-group "$RESOURCE_GROUP_NAME" `
+  --scope-name "$AMPLS_NAME"
+```
+
+```powershell
 # 環境変数をクリア
 Remove-Item env:PGPASSWORD -ErrorAction SilentlyContinue
 ```

@@ -96,6 +96,8 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
       name: 'PerGB2018'
     }
     retentionInDays: 30
+    publicNetworkAccessForIngestion: 'Disabled'
+    publicNetworkAccessForQuery: 'Disabled'
   }
 }
 
@@ -106,19 +108,22 @@ resource acaEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
   properties: {
     // 最新のAPIに合わせて構造を修正
     appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: logAnalytics.properties.customerId
-        sharedKey: logAnalytics.listKeys().primarySharedKey
-      }
+      destination: 'azure-monitor'
     }
     // workloadProfilesの代わりにこれを使用
     zoneRedundant: false
     // サブネット接続の指定方法を修正
     vnetConfiguration: {
       infrastructureSubnetId: acaSubnetId
-      internal: false
+      internal: true
     }
+    // ワークロードプロファイルを有効化
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
   }
 }
 
