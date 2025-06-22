@@ -508,7 +508,7 @@ az postgres flexible-server db create `
 $POSTGRES_SERVER_FQDN = az postgres flexible-server show --resource-group "$RESOURCE_GROUP_NAME" --name "$PSQL_SERVER_NAME" --query "fullyQualifiedDomainName" -o tsv
 ```
 
-## 8. Redisキャッシュの作成
+## 8. Azure Cache for Redisの作成
 
 ```powershell
 # Redis関連変数の初期化
@@ -572,7 +572,7 @@ if ($IS_ACA_ENABLED -eq $true) {
 }
 ```
 
-## 9. Container Apps環境の作成
+## 9. Azure Container Appsの作成
 
 ```powershell
 # 1. parameter.jsonをparameters.only-aca.jsonという名前でコピー
@@ -638,6 +638,37 @@ foreach ($AppName in $AppNames) {
       --name "$AppName" `
       --resource-group "$RESOURCE_GROUP_NAME" `
       --set "properties.template.scale.minReplicas=1"
+}
+
+# リソースの存在確認
+Write-Output "必要なリソースの確認:"
+
+try {
+    $storageCheck = az storage account show --resource-group "$RESOURCE_GROUP_NAME" --name "$STORAGE_ACCOUNT_NAME" --query "name" -o tsv 2>$null
+    Write-Output "1. ストレージアカウント: $(if ($storageCheck) { 'OK' } else { '未検出' })"
+} catch {
+    Write-Output "1. ストレージアカウント: 未検出"
+}
+
+try {
+    $psqlCheck = az postgres flexible-server show --resource-group "$RESOURCE_GROUP_NAME" --name "$PSQL_SERVER_NAME" --query "name" -o tsv 2>$null
+    Write-Output "2. PostgreSQLサーバー: $(if ($psqlCheck) { 'OK' } else { '未検出' })"
+} catch {
+    Write-Output "2. PostgreSQLサーバー: 未検出"
+}
+
+try {
+    $acaCheck = az containerapp env show --resource-group "$RESOURCE_GROUP_NAME" --name "$ACA_ENV_NAME" --query "name" -o tsv 2>$null
+    Write-Output "3. ACA環境: $(if ($acaCheck) { 'OK' } else { '未検出' })"
+} catch {
+    Write-Output "3. ACA環境: 未検出"
+}
+
+try {
+    $appCheck = az containerapp show --resource-group "$RESOURCE_GROUP_NAME" --name "nginx" --query "name" -o tsv 2>$null
+    Write-Output "4. Difyアプリケーション: $(if ($appCheck) { 'OK' } else { '未検出' })"
+} catch {
+    Write-Output "4. Difyアプリケーション: 未検出"
 }
 
 # デプロイされたアプリケーションのURLを取得
@@ -734,20 +765,17 @@ az network private-dns record-set a add-record `
   --ipv4-address $PRIVATE_ENDPOINT_IP_ADDRESS
 
 # Azure Monitor プライベートリンクスコープの作成
+$properties = @"
+{\"accessModeSettings\": {\"queryAccessMode\":\"PrivateOnly\", \"ingestionAccessMode\":\"PrivateOnly\"}}
+"@
 $AMPLS_NAME = "monitor-pls"
-az monitor private-link-scope create `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "$AMPLS_NAME"
-
-# リソースアクセスをプライベートのみへ変更
-# TODO: このコマンドを修正する必要あり
-$properties = @'
-{\"accessModeSettings\": {\"queryAccessMode\":\"PrivateOnly\",\"ingestionAccessMode\":\"PrivateOnly\"}}
-'@
-az monitor private-link-scope update `
-  --resource-group "$RESOURCE_GROUP_NAME" `
-  --name "$AMPLS_NAME" `
-  --add $properties
+az resource create ` 
+-g $RESOURCE_GROUP_NAME `
+--name $AMPLS_NAME ` 
+-l global `
+--api-version "2021-07-01-preview" `
+--resource-type Microsoft.Insights/privateLinkScopes `
+--properties $properties
 
 # Log Analytics WorkspaceのIDを取得
 $LOG_ANALYTICS_WS_ID = az monitor log-analytics workspace show `
@@ -772,6 +800,7 @@ az network private-endpoint create  `
   --group-id azuremonitor `
   --connection-name "$AMPLS_PE_NAME-conn"
 
+# AMPLSのプライベートDNSゾーンを作成
 az network private-endpoint dns-zone-group create `
   -g "$RESOURCE_GROUP_NAME" `
   --endpoint-name "$AMPLS_PE_NAME" `
@@ -789,6 +818,7 @@ $PE_CONNECTION_NAME = (az monitor private-link-scope private-endpoint-connection
   --scope-name "$AMPLS_NAME" `
   --query "[0].name" -o tsv)
 
+# プライベートエンドポイント接続を承認
 az monitor private-link-scope private-endpoint-connection approve `
   --name "$PE_CONNECTION_NAME" `
   --resource-group "$RESOURCE_GROUP_NAME" `
@@ -840,43 +870,6 @@ Remove-Item env:PGPASSWORD -ErrorAction SilentlyContinue
    - コンテナアプリ環境にストレージが正しく設定されているか（`az containerapp env storage set`コマンドが成功しているか）
    - YAMLファイル内のプロパティ構造が適切か
    - ストレージ名（`storageName`）とコンテナアプリ環境のストレージ名が一致しているか
-
-## デプロイ検証
-
-デプロイが完了したら、以下のことを確認してください：
-
-```powershell
-# リソースの存在確認
-Write-Output "必要なリソースの確認:"
-
-try {
-    $storageCheck = az storage account show --resource-group "$RESOURCE_GROUP_NAME" --name "$STORAGE_ACCOUNT_NAME" --query "name" -o tsv 2>$null
-    Write-Output "1. ストレージアカウント: $(if ($storageCheck) { 'OK' } else { '未検出' })"
-} catch {
-    Write-Output "1. ストレージアカウント: 未検出"
-}
-
-try {
-    $psqlCheck = az postgres flexible-server show --resource-group "$RESOURCE_GROUP_NAME" --name "$PSQL_SERVER_NAME" --query "name" -o tsv 2>$null
-    Write-Output "2. PostgreSQLサーバー: $(if ($psqlCheck) { 'OK' } else { '未検出' })"
-} catch {
-    Write-Output "2. PostgreSQLサーバー: 未検出"
-}
-
-try {
-    $acaCheck = az containerapp env show --resource-group "$RESOURCE_GROUP_NAME" --name "$ACA_ENV_NAME" --query "name" -o tsv 2>$null
-    Write-Output "3. ACA環境: $(if ($acaCheck) { 'OK' } else { '未検出' })"
-} catch {
-    Write-Output "3. ACA環境: 未検出"
-}
-
-try {
-    $appCheck = az containerapp show --resource-group "$RESOURCE_GROUP_NAME" --name "nginx" --query "name" -o tsv 2>$null
-    Write-Output "4. Difyアプリケーション: $(if ($appCheck) { 'OK' } else { '未検出' })"
-} catch {
-    Write-Output "4. Difyアプリケーション: 未検出"
-}
-```
 
 これにて、PowerShellでのAzure CLIを使用したDifyアプリケーションのデプロイ手順は完了です。
 
