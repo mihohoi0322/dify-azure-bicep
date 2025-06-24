@@ -769,9 +769,9 @@ $properties = @"
 {\"accessModeSettings\": {\"queryAccessMode\":\"PrivateOnly\", \"ingestionAccessMode\":\"PrivateOnly\"}}
 "@
 $AMPLS_NAME = "monitor-pls"
-az resource create ` 
+az resource create `
 -g $RESOURCE_GROUP_NAME `
---name $AMPLS_NAME ` 
+--name $AMPLS_NAME `
 -l global `
 --api-version "2021-07-01-preview" `
 --resource-type Microsoft.Insights/privateLinkScopes `
