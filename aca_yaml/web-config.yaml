@@ -1,0 +1,23 @@
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 3000
+      transport: tcp
+  template:
+    containers:
+      - name: web
+        image: langgenius/dify-web:1.1.2
+        resources:
+          cpu: 1
+          memory: 2Gi
+        env:
+          - name: CONSOLE_API_URL
+            value: http://api:5001
+          - name: CONSOLE_API_PREFIX
+            value: /console/api
+          - name: SERVICE_API_PREFIX
+            value: /api
+    scale:
+      minReplicas: 1
+      maxReplicas: 10

@@ -1,0 +1,40 @@
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 8194
+      transport: tcp
+  template:
+    containers:
+    - name: sandbox
+      image: langgenius/dify-sandbox:0.2.10
+      resources:
+        cpu: 2
+        memory: 4Gi
+      env:
+      - name: "LOG_LEVEL"
+        value: "INFO"
+      - name: "ENABLE_NETWORK"
+        value: "true"
+      - name: "SANDBOX_PORT"
+        value: "8194"
+      - name: "HTTP_PROXY"
+        value: "http://ssrfproxy:3128"
+      - name: "HTTPS_PROXY"
+        value: "http://ssrfproxy:3128"
+      volumeMounts:
+      - volumeName: sandboxshare
+        mountPath: /dependencies
+    scale:
+      minReplicas: 1
+      maxReplicas: 10
+      rules:
+      - name: "tcp-rule"
+        custom:
+          type: "tcp"
+          metadata:
+            concurrentRequests: "10"
+    volumes:
+    - name: "sandboxshare"
+      storageName: "sandboxshare"
+      storageType: "AzureFile"
