@@ -23,6 +23,7 @@
 7. Azure Container Apps環境
 8. 各種コンテナアプリ（Nginx、SSRFプロキシ、Sandbox、API、Worker、Web）
 9. 設定ファイルのアップロードと初期設定
+10. private 化の設定
 
 ## パラメータの読み込み
 
@@ -33,15 +34,18 @@
 $parametersJson = Get-Content -Path "./parameters.json" -Raw | ConvertFrom-Json
 
 # パラメータの取得とデフォルト値の設定
+
 $LOCATION = if ($parametersJson.parameters.location.value) { $parametersJson.parameters.location.value } else { "japaneast" }
 $RESOURCE_GROUP_PREFIX = if ($parametersJson.parameters.resourceGroupPrefix.value) { $parametersJson.parameters.resourceGroupPrefix.value } else { "rg" }
 $PGSQL_USER = if ($parametersJson.parameters.pgsqlUser.value) { $parametersJson.parameters.pgsqlUser.value } else { "user" }
 $PGSQL_PASSWORD = if ($parametersJson.parameters.pgsqlPassword.value) { $parametersJson.parameters.pgsqlPassword.value } else { "#QWEASDasdqwe" }
 $IS_PROVIDED_CERT = if ($parametersJson.parameters.isProvidedCert.value) { $parametersJson.parameters.isProvidedCert.value } else { $false }
 $ACA_CERT_PASSWORD = if ($parametersJson.parameters.acaCertPassword.value) { $parametersJson.parameters.acaCertPassword.value } else { "password" }
-$ACA_DIFY_CUSTOMER_DOMAIN = if ($parametersJson.parameters.acaDifyCustomerDomain.value) { $parametersJson.parameters.acaDifyCustomerDomain.value } else { "dify.example.com" }
 $ACA_APP_MIN_COUNT = if ($parametersJson.parameters.acaAppMinCount.value) { $parametersJson.parameters.acaAppMinCount.value } else { 0 }
 $IS_ACA_ENABLED = if ($parametersJson.parameters.isAcaEnabled.value) { $parametersJson.parameters.isAcaEnabled.value } else { $false }
+
+カスタムドメインを使用する場合の設定
+$ACA_DIFY_CUSTOMER_DOMAIN = if ($parametersJson.parameters.acaDifyCustomerDomain.value) { $parametersJson.parameters.acaDifyCustomerDomain.value } else { "dify.example.com" }
 
 # デフォルト値の設定
 $STORAGE_ACCOUNT_BASE = "acadifytest"
@@ -52,12 +56,14 @@ $ACA_ENV_NAME = "dify-aca-env"
 $ACA_LOGA_NAME = "dify-loga"
 $IP_PREFIX = "10.99"
 
+# Difyのコンテナイメージの設定 (もしバージョンの変更が必要な場合はここを更新)
 $DIFY_API_IMAGE = "langgenius/dify-api:1.1.2"
 $DIFY_SANDBOX_IMAGE = "langgenius/dify-sandbox:0.2.10"
 $DIFY_WEB_IMAGE = "langgenius/dify-web:1.1.2"
 $DIFY_PLUGIN_DAEMON_IMAGE = "langgenius/dify-plugin-daemon:0.0.6-local"
 
 # リソースグループ名の設定
+既存のリソースグループがある場合はその名前を使用し、なければ新しい名前を生成します。
 $RESOURCE_GROUP_NAME = "$RESOURCE_GROUP_PREFIX-$LOCATION"
 ```
 
@@ -69,6 +75,7 @@ az account show --query "name" -o tsv
 ```
 
 ## 1. リソースグループの作成
+既存のリソースグループがある場合はこの手順をスキップ
 
 ```powershell
 # リソースグループの作成
@@ -85,6 +92,8 @@ Write-Output "リソースグループ $RESOURCE_GROUP_NAME を作成しまし�
 $SUBSCRIPTION_ID = az account show --query "id" -o tsv
 
 # ハッシュ生成（PowerShellのGet-FileHashを使用）
+一意のリソースを識別するたハッシュ値を生成します。
+
 $hashInput = "$SUBSCRIPTION_ID$RESOURCE_GROUP_NAME"
 $hashBytes = [System.Text.Encoding]::UTF8.GetBytes($hashInput)
 $hash = [System.Security.Cryptography.MD5]::Create().ComputeHash($hashBytes)
@@ -95,8 +104,9 @@ Write-Output "生成されたハッシュ: $RG_NAME_HEX"
 
 ## 3. 仮想ネットワークとサブネットの作成
 
+
 ```powershell
-# 仮想ネットワークの作成
+# 仮想ネットワークの作成 (既存の仮想ネットワークがある場合はこの CLI をスキップ)
 az network vnet create `
   --resource-group "$RESOURCE_GROUP_NAME" `
   --name "vnet-$LOCATION" `
@@ -128,7 +138,7 @@ az network vnet subnet create `
   --service-endpoints "Microsoft.Storage" `
   --delegations "Microsoft.DBforPostgreSQL/flexibleServers"
 
-# サブネットIDの取得
+# サブネットIDの取得 (後続のコマンドで使用)
 $VNET_ID = az network vnet show --resource-group "$RESOURCE_GROUP_NAME" --name "vnet-$LOCATION" --query "id" -o tsv
 $PRIVATE_LINK_SUBNET_ID = az network vnet subnet show --resource-group "$RESOURCE_GROUP_NAME" --vnet-name "vnet-$LOCATION" --name "PrivateLinkSubnet" --query "id" -o tsv
 $ACA_SUBNET_ID = az network vnet subnet show --resource-group "$RESOURCE_GROUP_NAME" --vnet-name "vnet-$LOCATION" --name "ACASubnet" --query "id" -o tsv
@@ -268,6 +278,8 @@ function Create-FileShareIfNotExists {
 }
 
 # 各ファイル共有の作成
+ACA 環境で使用するためのファイル共有を作成します。
+
 $NGINX_SHARE_NAME = "nginx"
 $SANDBOX_SHARE_NAME = "sandbox"
 $SSRFPROXY_SHARE_NAME = "ssrfproxy"
@@ -453,8 +465,10 @@ try {
     Remove-Item -Path $TEMP_DIR.FullName -Recurse -Force -ErrorAction SilentlyContinue
 }
 ```
+各ファイル共有にアップロードされた設定ファイルは、Dify の各コンテナアプリで使用される。
 
 ## 7. PostgreSQLフレキシブルサーバーの作成
+作成に少し時間がかかります。
 
 ```powershell
 # PostgreSQLサーバー名の設定
@@ -509,6 +523,7 @@ $POSTGRES_SERVER_FQDN = az postgres flexible-server show --resource-group "$RESO
 ```
 
 ## 8. Azure Cache for Redisの作成
+作成に20~30分程度かかります。
 
 ```powershell
 # Redis関連変数の初期化
@@ -573,6 +588,7 @@ if ($IS_ACA_ENABLED -eq $true) {
 ```
 
 ## 9. Azure Container Appsの作成
+コンテナーアプリを複数デプロイするため、Bicep を使用します。コンテナーイメージが既存の Azure Container Registry (ACR) にある場合は、[9. Azure Container Appsの作成(既存ACRを利用)]を参照してください。
 
 ```powershell
 # 1. parameter.jsonをparameters.only-aca.jsonという名前でコピー
@@ -614,6 +630,67 @@ az deployment sub create --name $DEPLOYMENT_NAME --location $LOCATION --template
 # デプロイ完了後、parameters.only-aca.jsonを削除
 Remove-Item -Path $paramFile -Force
 ```
+
+## 9. Azure Container Appsの作成(既存ACRを利用)
+※このセクションは、既存の Azure Container Registry (ACR) を使用してコンテナーアプリをデプロイする場合に使用します。ACR の設定が完了していることを前提としています。
+そのため、ACR を利用しない場合は、上記の「9. Azure Container Appsの作成」セクションを使用してください。
+
+```powershell
+# 1. parameter.jsonをparameters.only-aca.jsonという名前でコピー
+Copy-Item -Path "parameters.json" -Destination "parameters-only-aca.json"
+
+# 2. parameters.only-aca.jsonに対して $ACA_SUBNET_ID の値を acaSubnetId というキー名としてJSONに追記
+# 変数名とparameters.jsonのキー名の対応表
+$paramMap = @{
+    "ACA_SUBNET_ID"        = "acaSubnetId"
+    "STORAGE_ACCOUNT_KEY"  = "storageAccountKey"
+    "STORAGE_ACCOUNT_NAME" = "storageAccountName"
+    "NGINX_SHARE_NAME"    = "nginxShareName"
+    "SANDBOX_SHARE_NAME"  = "sandboxShareName"
+    "SSRFPROXY_SHARE_NAME" = "ssrfproxyShareName"
+    "PLUGIN_STORAGE_SHARE_NAME" = "pluginStorageShareName"
+    "POSTGRES_SERVER_FQDN" = "postgresServerFqdn"
+    "REDIS_HOST_NAME" = "redisHostName"
+    "REDIS_PRIMARY_KEY" = "redisPrimaryKey"
+    "BLOB_ENDPOINT" = "blobEndpoint"
+}
+
+$paramFile = "parameters-only-aca.json"
+$params = Get-Content $paramFile | ConvertFrom-Json
+
+foreach ($varName in $paramMap.Keys) {
+    $paramName = $paramMap[$varName]
+    $value = Get-Variable -Name $varName -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $value) {
+        $params.parameters | Add-Member -MemberType NoteProperty -Name $paramName -Value @{ "value" = $value } -Force
+    }
+}
+
+$params | ConvertTo-Json -Depth 10 | Set-Content $paramFile -Encoding UTF8
+
+## 既存の main-only-aca.bicep ファイルの変数指定部分を以下のように修正。
+<ACA_REGISTRY_NAME> を実際の Azure Container Registry 名に置き換えてください。
+
+```bicep
+@description('Dify APIイメージ')
+param difyApiImage string = '<ACA_REGISTRY_NAME>.azurecr.io/dify-api:1.1.2'
+
+@description('Dify サンドボックスイメージ')
+param difySandboxImage string = '<ACA_REGISTRY_NAME>.azurecr.io/dify-sandbox:0.2.10'
+
+@description('Dify Webイメージ')
+param difyWebImage string = '<ACA_REGISTRY_NAME>.azurecr.io/dify-web:1.1.2'
+
+@description('Dify Plugin Daemonイメージ')
+param difyPluginDaemonImage string = '<ACA_REGISTRY_NAME>.azurecr.io/dify-plugin-daemon:0.0.6-local'
+```
+
+# bicepを使用してContainer Apps環境、および関連リソースをデプロイ
+$DEPLOYMENT_NAME = "dify-deployment-$(Get-Date -Format 'yyyyMMddHHmmss')"
+az deployment sub create --name $DEPLOYMENT_NAME --location $LOCATION --template-file main-only-aca.bicep --parameters parameters-only-aca.json
+
+# デプロイ完了後、parameters.only-aca.jsonを削除
+Remove-Item -Path $paramFile -Force
 
 ## 10. デプロイ後の設定と動作確認
 
@@ -765,6 +842,9 @@ az network private-dns record-set a add-record `
   --ipv4-address $PRIVATE_ENDPOINT_IP_ADDRESS
 
 # Azure Monitor プライベートリンクスコープの作成
+監視の設定を行うため、Azure Monitor Private Link Scope (AMPLS) を作成します。
+もし監視を行わない場合は、これ以降のステップはスキップできます。
+
 $properties = @"
 {\"accessModeSettings\": {\"queryAccessMode\":\"PrivateOnly\", \"ingestionAccessMode\":\"PrivateOnly\"}}
 "@
@@ -836,7 +916,7 @@ Remove-Item env:PGPASSWORD -ErrorAction SilentlyContinue
 
 1. **パスワードとシークレットの管理**:
    - `parameters.json`にパスワードを平文で記載することは本番環境では推奨されません
-   - Azure Key Vaultを使用してシークレットを管理することを強く推奨します
+   - 本番で利用する場合、Azure Key Vaultを使用してシークレットを管理することを強く推奨します
    - コマンド履歴にパスワードが残らないよう注意してください
 
 2. **Managed Identity の使用推奨**:
@@ -873,7 +953,7 @@ Remove-Item env:PGPASSWORD -ErrorAction SilentlyContinue
 
 これにて、PowerShellでのAzure CLIを使用したDifyアプリケーションのデプロイ手順は完了です。
 
-## エラーハンドリングとベストプラクティス
+## エラーハンドリング
 
 deploy.shスクリプトのように、実際の運用では以下のエラーハンドリングを追加することを推奨します：
 
@@ -915,16 +995,4 @@ retry_command() {
 
 # 使用例
 # retry_command 3 "az storage share create --name '$NGINX_SHARE_NAME' --connection-string '$CONNECTION_STRING'"
-```
-
-### **差分チェック機能**
-
-本番環境では、デプロイ前にwhat-ifチェックを実行することを推奨します：
-
-```bash
-# デプロイ前の検証（Bicepを使用する場合の例）
-az deployment group what-if \
-  --resource-group "$RESOURCE_GROUP_NAME" \
-  --template-file main.bicep \
-  --parameters parameters.json
 ```
