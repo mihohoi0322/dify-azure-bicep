@@ -1,0 +1,62 @@
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 5002
+      transport: tcp
+  template:
+    containers:
+      - name: plugindaemonapp
+        image: langgenius/dify-plugin-daemon:0.0.6-local
+        env:
+          - name: GIN_MODE
+            value: release
+          - name: SERVER_PORT
+            value: "5002"
+          - name: SERVER_KEY
+            value: lYkiYYT6owG+71oLerGzA7GXCgOT++6ovaezWAjpCjf+Sjc3ZtU+qUEi
+          - name: PLATFORM
+            value: local
+          - name: DIFY_INNER_API_KEY
+            value: -QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1
+          - name: DIFY_INNER_API_URL
+            value: http://api:5001
+          - name: DB_PORT
+            value: "5432"
+          - name: DB_DATABASE
+            value: dify
+          - name: REDIS_PORT
+            value: "6380"
+          - name: REDIS_USE_SSL
+            value: "true"
+          - name: REDIS_DB
+            value: "0"
+          - name: PLUGIN_STORAGE_TYPE
+            value: local
+          - name: PLUGIN_WORKING_PATH
+            value: cwd
+          - name: PLUGIN_INSTALLED_PATH
+            value: plugin
+          - name: DB_SSL_MODE
+            value: require
+          - name: PLUGIN_WEBHOOK_ENABLED
+            value: "true"
+          - name: PLUGIN_REMOTE_INSTALLING_ENABLED
+            value: "true"
+          - name: PLUGIN_REMOTE_INSTALLING_HOST
+            value: 127.0.0.1
+          - name: PLUGIN_REMOTE_INSTALLING_PORT
+            value: "5003"
+        volumeMounts:
+          - mountPath: /mnt/pluginstorage
+            volumeName: pluginstorageshare
+        resources:
+          cpu: 1
+          memory: 2Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 10
+    volumes:
+      - name: pluginstorageshare
+        storageName: pluginstorageshare
+        storageType: AzureFile

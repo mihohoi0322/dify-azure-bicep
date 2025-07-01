@@ -1,0 +1,31 @@
+properties:
+  configuration:
+    ingress:
+      external: true
+      targetPort: 80
+      transport: auto
+    secrets:
+      - name: "storage-key"
+        value: "to be replaced"
+  template:
+    containers:
+    - name: nginx
+      image: nginx:latest
+      command:
+      - "/bin/bash"
+      args:
+      - "-c"
+      - "./custom-nginx/start.sh"
+      resources:
+        cpu: 0.5
+        memory: 1Gi
+      volumeMounts:
+      - volumeName: nginxshare
+        mountPath: /custom-nginx
+    scale:
+      minReplicas: 1
+      maxReplicas: 10
+    volumes:
+      - name: nginxshare
+        storageName: nginxshare
+        storageType: AzureFile
